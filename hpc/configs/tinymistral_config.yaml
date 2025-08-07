@@ -1,0 +1,49 @@
+# HPC Configuration for TinyMistral experiments
+MODEL_PATH: "/scratch/user/models/TinyMistral-6x248M"
+NUM_EXPERTS: 6
+NUM_CLASSES: 20
+BATCH_SIZE: 16
+DEVICE: "cuda"
+
+# Dataset Configuration
+DATASET: "20_newsgroups"
+MAX_LENGTH: 512
+
+# HPC Paths
+HPC_SCRATCH_DIR: "/scratch/user"
+HPC_RESULTS_DIR: "/scratch/user/results"
+HPC_LOGS_DIR: "/scratch/user/logs"
+
+# Local sync paths
+LOCAL_RESULTS_DIR: "./results"
+EXPERIMENT_NAME: "tinymistral_analysis"
+
+# SLURM Configuration
+SLURM:
+  PARTITION: "gpu-a100-short"
+  TIME: "02:00:00"
+  MEMORY: "32G"
+  CPUS: 4
+  GPU: 1
+
+CLASS_NAMES: 
+  - 'alt.atheism'
+  - 'comp.graphics'
+  - 'comp.os.ms-windows.misc'
+  - 'comp.sys.ibm.pc.hardware'
+  - 'comp.sys.mac.hardware'
+  - 'comp.windows.x'
+  - 'misc.forsale'
+  - 'rec.autos'
+  - 'rec.motorcycles'
+  - 'rec.sport.baseball'
+  - 'rec.sport.hockey'
+  - 'sci.crypt'
+  - 'sci.electronics'
+  - 'sci.med'
+  - 'sci.space'
+  - 'soc.religion.christian'
+  - 'talk.politics.guns'
+  - 'talk.politics.mideast'
+  - 'talk.politics.misc'
+  - 'talk.religion.misc'
