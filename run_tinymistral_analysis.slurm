@@ -2,8 +2,8 @@
 
 # --- Slurm Job Configuration ---
 #SBATCH --job-name=tinymistral_analysis # Name of the job
-#SBATCH --partition=gpgpu               # Specify the GPU partition
-#SBATCH --gres=gpu:1                    # Request one GPU
+#SBATCH -p gpu-a100-short
+#SBATCH --gres=gpu:1
 #SBATCH --ntasks=1                      # Run on a single CPU core
 #SBATCH --cpus-per-task=4               # Request 4 CPUs
 #SBATCH --mem=32G                       # Request 32GB of memory
