@@ -5,7 +5,7 @@
 #SBATCH -p gpu-a100-short
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1                      # Run on a single CPU core
-#SBATCH --cpus-per-task=4               # Request 4 CPUs
+#SBATCH --cpus-per-task=2               # Request 4 CPUs
 #SBATCH --mem=32G                       # Request 32GB of memory
 #SBATCH --time=00:30:00                 # Job time limit (1 hour)
 #SBATCH --output=~/out_slurm/tinymistral/tinymistral_%j.out     # Standard output file
