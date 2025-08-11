@@ -1,38 +1,26 @@
-# TinyMistral Extended Training Configuration
-
-# Model settings
+# TinyMistral Training Configuration
 MODEL_NAME: "M4-ai/TinyMistral-6x248M"
-NUM_CLASSES: 4
-
-# Training settings
-NUM_EPOCHS: 3
-BATCH_SIZE: 8  # Increased for faster training
-LEARNING_RATE: 0.001  # Higher learning rate for faster convergence
-WEIGHT_DECAY: 0.01
-WARMUP_STEPS: 50
-
-# Training limits (for resource management)
-MAX_BATCHES_PER_EPOCH: 100  # Much fewer batches for speed
-MAX_VAL_BATCHES: 15  # Very limited validation for CPU (15 batches = ~2 minutes)
-EVAL_EVERY_N_EPOCHS: 3
-SAVE_EVERY_N_EPOCHS: 5
-
-# Early stopping
-PATIENCE: 3  # Stop if no improvement for 3 epochs (faster early stopping)
-MIN_DELTA: 0.005  # Smaller improvement threshold
-
-# Data settings  
 DATASET: "ag_news"
-MAX_LENGTH: 64  # Shorter sequences for speed
-TRAIN_SPLIT: 0.8
-VAL_SPLIT: 0.2
 
-# Optimization settings
-USE_SCHEDULER: true
-SCHEDULER_TYPE: "cosine"  # cosine, linear, step
+# Training parameters
+NUM_EPOCHS: 3
+BATCH_SIZE: 16
+LEARNING_RATE: 0.0005
+WEIGHT_DECAY: 0.01
 GRADIENT_CLIPPING: 1.0
 
-# Logging and monitoring
-LOG_EVERY_N_BATCHES: 50
-SAVE_TRAINING_CURVES: true
-DETAILED_LOGGING: true
+# Performance optimization
+MAX_BATCHES_PER_EPOCH: 50    # Limit batches for faster training
+MAX_VAL_BATCHES: 25          # Limit validation batches
+
+# Data parameters
+MAX_LENGTH: 128              # Token sequence length
+NUM_WORKERS: 0               # Data loader workers
+
+# Model parameters
+FREEZE_BASE_MODEL: true      # Only train classification head
+DROPOUT: 0.1
+
+# Paths
+RESULTS_DIR: "results/tinymistral"
+LOG_LEVEL: "INFO"
