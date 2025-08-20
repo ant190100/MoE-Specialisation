@@ -15,6 +15,8 @@ module purge
 
 # Load only CUDA, not Python (let conda handle Python)
 module load CUDA/11.7.0
+module load OpenSSL/1.1
+module load GCCcore/11.3.0
 
 
 # Initialize conda
