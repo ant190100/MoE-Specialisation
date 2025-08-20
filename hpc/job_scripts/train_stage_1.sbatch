@@ -12,16 +12,22 @@
 
 # --- Environment Setup ---
 module purge
-module load Python/3.10.4-GCCcore-11.3.0
+module load Python/3.10.4
 module load CUDA/11.7.0
 
 # Initialize conda properly
-source ~/.bashrc
-source ~/miniconda3/etc/profile.d/conda.sh
+source $HOME/.bashrc
+
 conda activate moe_project
 
+# Verify conda activation worked
+echo "Active conda environment: $CONDA_DEFAULT_ENV"
+echo "Python location: $(which python)"
+echo "PyTorch check:"
+python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
+
 # Change to project directory  
-cd ~/MoE-Specialisation
+cd $HOME/MoE-Specialisation
 
 # Add project to Python path
 export PYTHONPATH="${PWD}:${PYTHONPATH}"
