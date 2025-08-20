@@ -1,0 +1,19 @@
+# file: config.yaml
+
+# Paths to local models and data
+paths:
+  mistral_local_path: "/data/gpfs/projects/COMP90055/aticinovic/models/Mistral-7B-v0.3"
+  clip_local_path: "/data/gpfs/projects/COMP90055/aticinovic/models/clip-vit-large-patch14"
+  image_dir: "/data/gpfs/projects/COMP90055/aticinovic/datasets/coco/train2017"
+  annotations_file: "/data/gpfs/projects/COMP90055/aticinovic/datasets/coco/annotations/captions_train2017.json"
+
+# Training parameters for Stage 1
+training_stage1:
+  num_epochs: 3
+  batch_size: 8
+  learning_rate: 0.0001
+  subset_fraction: 0.001 
+
+# Dataloader parameters
+dataloader:
+  num_workers: 4
