@@ -17,7 +17,10 @@ module load CUDA/11.7.0
 conda activate moe_project
 
 # Change to project directory
-cd ~/
+cd ~/MoE-Specialisation
+
+# Add project to Python path
+export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
 # --- Execute the Main Training Script ---
 echo "Starting VLM Stage 1 training script..."
