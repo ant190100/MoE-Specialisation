@@ -13,26 +13,26 @@
 # --- Environment Setup ---
 module purge
 
-# Load dependencies in correct order (CRITICAL!)
-module load GCCcore/11.3.0
-module load Python/3.10.4
+# Load only CUDA, not Python (let conda handle Python)
 module load CUDA/11.7.0
 
-echo "Modules loaded successfully"
-echo "Loaded modules: $(module list 2>&1)"
 
 # Initialize conda
 source $HOME/.bashrc
 conda activate moe_project
 
-echo "Conda environment: $CONDA_DEFAULT_ENV"
-echo "Python version: $(python --version)"
+# Force the conda environment Python to be used
+export PATH="/home/aticinovic/.conda/envs/moe_project/bin:$PATH"
+
+echo "=== VERIFICATION ==="
+echo "Active environment: $CONDA_DEFAULT_ENV"
 echo "Python location: $(which python)"
+echo "Python version: $(python --version)"
 
-# Verify PyTorch is available
-python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+# Test packages
+python -c "import yaml; print('✅ YAML available')"
+python -c "import torch; print(f'✅ PyTorch {torch.__version__} available, CUDA: {torch.cuda.is_available()}')"
 
-# Change to project directory
 cd $HOME/MoE-Specialisation
 export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
