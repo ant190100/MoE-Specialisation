@@ -7,16 +7,20 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=01:00:00
-#SBATCH --output=~/out_slurm/train_stage_1/train_stage_1_%j.out
-#SBATCH --error=~/err_slurm/train_stage_1/train_stage_1_%j.err
+#SBATCH --output=../out_slurm/train_stage_1/train_stage_1_%j.out
+#SBATCH --error=../err_slurm/train_stage_1/train_stage_1_%j.err
 
 # --- Environment Setup ---
 module purge
 module load Python/3.10.4-GCCcore-11.3.0
 module load CUDA/11.7.0
+
+# Initialize conda properly
+source ~/.bashrc
+source ~/miniconda3/etc/profile.d/conda.sh
 conda activate moe_project
 
-# Change to project directory
+# Change to project directory  
 cd ~/MoE-Specialisation
 
 # Add project to Python path
@@ -24,8 +28,6 @@ export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
 # --- Execute the Main Training Script ---
 echo "Starting VLM Stage 1 training script..."
-# This command works because all .py files are in the same directory.
-# Python's import system will find them automatically.
 srun python training_scripts/train_stage_1.py
 
 echo "Job finished."

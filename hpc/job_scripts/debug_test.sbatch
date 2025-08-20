@@ -3,8 +3,8 @@
 #SBATCH -p gpu-a100-short
 #SBATCH --gres=gpu:1
 #SBATCH --time=00:05:00
-#SBATCH --output=~/out_slurm/debug_%j.out
-#SBATCH --error=~/err_slurm/debug_%j.err
+#SBATCH --output=../out_slurm/debug_%j.out
+#SBATCH --error=../err_slurm/debug_%j.err
 
 echo "=== Debug Test Starting ==="
 echo "Current directory: $(pwd)"
