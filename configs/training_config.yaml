@@ -7,6 +7,8 @@ paths:
   image_dir: "/data/gpfs/projects/COMP90055/aticinovic/datasets/coco/train2017"
   annotations_file: "/data/gpfs/projects/COMP90055/aticinovic/datasets/coco/annotations/captions_train2017.json"
 
+  output_dir: "/data/gpfs/projects/COMP90055/aticinovic/outputs
+
 # Training parameters for Stage 1
 training_stage1:
   num_epochs: 3
