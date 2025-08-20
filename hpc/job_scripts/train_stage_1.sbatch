@@ -12,27 +12,30 @@
 
 # --- Environment Setup ---
 module purge
+
+# Load dependencies in correct order (CRITICAL!)
+module load GCCcore/11.3.0
 module load Python/3.10.4
 module load CUDA/11.7.0
 
-# Initialize conda properly
-source $HOME/.bashrc
+echo "Modules loaded successfully"
+echo "Loaded modules: $(module list 2>&1)"
 
+# Initialize conda
+source $HOME/.bashrc
 conda activate moe_project
 
-# Verify conda activation worked
-echo "Active conda environment: $CONDA_DEFAULT_ENV"
+echo "Conda environment: $CONDA_DEFAULT_ENV"
+echo "Python version: $(python --version)"
 echo "Python location: $(which python)"
-echo "PyTorch check:"
-python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
 
-# Change to project directory  
+# Verify PyTorch is available
+python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+
+# Change to project directory
 cd $HOME/MoE-Specialisation
-
-# Add project to Python path
 export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
-# --- Execute the Main Training Script ---
 echo "Starting VLM Stage 1 training script..."
 srun python training_scripts/train_stage_1.py
 
