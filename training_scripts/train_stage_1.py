@@ -4,7 +4,7 @@ import os
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from transformers import AutoProcessor, MistralForCausalLM, CLIPVisionModel
+from transformers import AutoProcessor, AutoTokenizer, MistralForCausalLM, CLIPVisionModel
 
 from models import VisionLanguageConnector
 from data import COCO_Loader
@@ -26,7 +26,7 @@ print("Loading foundational models from local paths...")
 vision_encoder = CLIPVisionModel.from_pretrained(paths['clip_local_path']).to(DEVICE)
 clip_processor = AutoProcessor.from_pretrained(paths['clip_local_path'])
 llm = MistralForCausalLM.from_pretrained(paths['mistral_local_path']).to(DEVICE)
-tokenizer = AutoProcessor.from_pretrained(paths['mistral_local_path'])
+tokenizer = AutoTokenizer.from_pretrained(paths['mistral_local_path'])
 tokenizer.pad_token = tokenizer.eos_token
 
 # Freeze model weights
