@@ -91,12 +91,30 @@ for epoch in range(NUM_EPOCHS):
         optimizer.step()
         
         total_loss += loss.item()
+
+        # Clean up intermediate tensors
+        del visual_outputs, patch_embeddings, text_embeddings, visual_soft_tokens
+        del combined_embeddings, visual_attention_mask, combined_attention_mask
+        del outputs, logits, shift_logits, shift_labels, loss
+
         if i % 100 == 0:
             print(f"Epoch [{epoch+1}/{NUM_EPOCHS}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}")
 
     print(f"Epoch {epoch+1} Average Loss: {total_loss / len(train_loader):.4f}")
+        # Add memory cleanup between epochs
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    import gc
+    gc.collect()
 
 print("✅ Stage 1 training complete.")
+
+# --- Free up memory before saving ---
+print("🧹 Cleaning up memory...")
+del llm, vision_encoder  # Remove large models from memory
+torch.cuda.empty_cache() if torch.cuda.is_available() else None
+import gc
+gc.collect()
 
 # --- Save the Trained Connector Weights ---
 print("💾 Saving the trained vision connector weights...")
