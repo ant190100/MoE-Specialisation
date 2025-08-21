@@ -42,7 +42,10 @@ if torch.cuda.is_available():
 print("Loading foundational models from local paths...")
 vision_encoder = CLIPVisionModel.from_pretrained(paths["clip_local_path"]).to(DEVICE)
 clip_processor = AutoProcessor.from_pretrained(paths["clip_local_path"])
-llm = MistralForCausalLM.from_pretrained(paths["mistral_local_path"]).to(DEVICE)
+llm = MistralForCausalLM.from_pretrained(
+    paths["mistral_local_path"],
+    load_in_8bit=True,
+)
 tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"])
 tokenizer.pad_token = tokenizer.eos_token
 

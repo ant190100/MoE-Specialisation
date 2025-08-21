@@ -1,30 +1,29 @@
 #!/bin/bash
 #SBATCH --job-name=vlm_stage1_training
-#SBATCH -p gpu-a100-short
+#SBATCH -p gpu-l40s
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=01:00:00
+#SBATCH --time=00:30:00
 #SBATCH --output=../out_slurm/train_stage_1/train_stage_1_%j.out
 #SBATCH --error=../err_slurm/train_stage_1/train_stage_1_%j.err
 
 # Load modules
 module purge
-module load GCC/11.3.0
-module load OpenMPI/4.1.4
-module load CUDA/11.7.0
+module load GCCcore/11.3.0
 module load Python/3.11.3
-module load PyTorch/2.1.2-CUDA-11.7.0
+module load CUDA  # Load the default CUDA
 
-conda activate moe_final
-
-# CRITICAL: Force virtual environment packages to override system packages
-export PYTHONPATH="/home/aticinovic/venv_moe_project/lib/python3.10/site-packages:${PYTHONPATH}"
+source ~/pytorch_latest_venv/bin/activate # Activate the new venv
 
 echo "=== VERIFICATION ==="
-python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
+# Verify that python is coming from the correct environment
+which python
+# Verify PyTorch can see the GPU
+python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA available: {torch.cuda.is_available()}')"
+python -c "import transformers; print(f'Transformers: {transformers.__version__}')"
 
 # Rest of your script...
 cd $HOME/MoE-Specialisation
