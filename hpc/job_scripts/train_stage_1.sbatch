@@ -20,6 +20,9 @@ module load PyTorch/2.1.2-CUDA-11.7.0
 # Activate virtual environment (NOT conda)
 source ~/venv_moe_project/bin/activate
 
+# CRITICAL: Force virtual environment packages to override system packages
+export PYTHONPATH="/home/aticinovic/venv_moe_project/lib/python3.10/site-packages:${PYTHONPATH}"
+
 echo "=== VERIFICATION ==="
 python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
 

@@ -43,7 +43,7 @@ print("Loading foundational models from local paths...")
 vision_encoder = CLIPVisionModel.from_pretrained(paths["clip_local_path"]).to(DEVICE)
 clip_processor = AutoProcessor.from_pretrained(paths["clip_local_path"])
 llm = MistralForCausalLM.from_pretrained(paths["mistral_local_path"]).to(DEVICE)
-tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"], use_fast=False)
+tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"])
 tokenizer.pad_token = tokenizer.eos_token
 
 # Freeze model weights
