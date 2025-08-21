@@ -10,40 +10,23 @@
 #SBATCH --output=../out_slurm/train_stage_1/train_stage_1_%j.out
 #SBATCH --error=../err_slurm/train_stage_1/train_stage_1_%j.err
 
-# --- Environment Setup ---
+# Load modules
 module purge
-
-# Load only CUDA, not Python (let conda handle Python)
+module load GCCcore/11.3.0
+module load Python/3.11.3
 module load CUDA/11.7.0
 
-# Set CUDA environment variables
-export CUDA_VISIBLE_DEVICES=0
-export CUDA_HOME=/usr/local/cuda-11.7
-
-echo "CUDA setup:"
-echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
-nvidia-smi
-
-# Initialize conda
-source $HOME/.bashrc
-conda activate moe_project
-
-# Force the conda environment Python to be used
-export PATH="/home/aticinovic/.conda/envs/moe_project/bin:$PATH"
+# Activate virtual environment (NOT conda)
+source ~/venv_moe_project/bin/activate
 
 echo "=== VERIFICATION ==="
-echo "Active environment: $CONDA_DEFAULT_ENV"
-echo "Python location: $(which python)"
-echo "Python version: $(python --version)"
+python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
 
-# Test packages
-python -c "import yaml; print('✅ YAML available')"
-python -c "import torch; print(f'✅ PyTorch {torch.__version__} available, CUDA: {torch.cuda.is_available()}')"
-
+# Rest of your script...
 cd $HOME/MoE-Specialisation
 export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
-echo "Starting VLM Stage 1 training script..."
-srun python training_scripts/train_stage_1.py
+echo "Starting training script..."
+python training_scripts/train_stage_1.py
 
 echo "Job finished."
