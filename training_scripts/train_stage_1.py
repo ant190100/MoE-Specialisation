@@ -93,7 +93,7 @@ for epoch in range(NUM_EPOCHS):
         total_loss += loss.item()
 
         if i % 100 == 0:
-        print(f"Epoch [{epoch+1}/{NUM_EPOCHS}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}")
+            print(f"Epoch [{epoch+1}/{NUM_EPOCHS}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}")
 
         # Clean up intermediate tensors
         del visual_outputs, patch_embeddings, text_embeddings, visual_soft_tokens
