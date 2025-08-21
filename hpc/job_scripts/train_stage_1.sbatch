@@ -18,8 +18,7 @@ module load CUDA/11.7.0
 module load Python/3.11.3
 module load PyTorch/2.1.2-CUDA-11.7.0
 
-# Activate virtual environment (NOT conda)
-source ~/venv_moe_project_py311/bin/activate
+conda activate moe_final
 
 # CRITICAL: Force virtual environment packages to override system packages
 export PYTHONPATH="/home/aticinovic/venv_moe_project/lib/python3.10/site-packages:${PYTHONPATH}"
