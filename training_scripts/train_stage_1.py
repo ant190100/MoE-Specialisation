@@ -13,6 +13,8 @@ from transformers import (
 
 from models import VisionLanguageConnector
 from data import COCO_Loader
+# Import both autocast and GradScaler
+from torch.cuda.amp import autocast, GradScaler
 
 # --- 1. Load Configuration from YAML file ---
 with open("./configs/training_config.yaml", "r") as file:
@@ -74,9 +76,11 @@ train_loader = DataLoader(
     pin_memory=True,
 )
 
-# --- 4. Setup Optimizer and Loss ---
+# --- 4. Setup Optimizer, Loss, and GradScaler ---
 optimizer = optim.AdamW(vision_connector.parameters(), lr=train_params["learning_rate"])
 loss_fn = nn.CrossEntropyLoss()
+# Initialize the gradient scaler for mixed-precision training
+scaler = GradScaler()
 
 # --- 5. The Training Loop ---
 print("🚀 Starting Stage 1 training...")
@@ -92,37 +96,42 @@ for epoch in range(NUM_EPOCHS):
         )
         optimizer.zero_grad()
 
-        with torch.no_grad():
-            visual_outputs = vision_encoder(
-                pixel_values=images, output_hidden_states=False
+        # Wrap the forward pass with autocast
+        with autocast():
+            with torch.no_grad():
+                visual_outputs = vision_encoder(
+                    pixel_values=images, output_hidden_states=False
+                )
+                patch_embeddings = visual_outputs.last_hidden_state
+                text_embeddings = llm.model.embed_tokens(input_ids)
+
+            visual_soft_tokens = vision_connector(patch_embeddings)
+            combined_embeddings = torch.cat([visual_soft_tokens, text_embeddings], dim=1)
+
+            visual_attention_mask = torch.ones(
+                visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE
             )
-            patch_embeddings = visual_outputs.last_hidden_state
-            text_embeddings = llm.model.embed_tokens(input_ids)
+            combined_attention_mask = torch.cat(
+                [visual_attention_mask, attention_mask], dim=1
+            )
 
-        visual_soft_tokens = vision_connector(patch_embeddings)
-        combined_embeddings = torch.cat([visual_soft_tokens, text_embeddings], dim=1)
+            outputs = llm(
+                inputs_embeds=combined_embeddings, attention_mask=combined_attention_mask
+            )
+            logits = outputs.logits
 
-        visual_attention_mask = torch.ones(
-            visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE
-        )
-        combined_attention_mask = torch.cat(
-            [visual_attention_mask, attention_mask], dim=1
-        )
+            # Calculate loss only on the caption tokens
+            shift_logits = logits[..., visual_soft_tokens.shape[1] : -1, :].contiguous()
+            shift_labels = input_ids[..., 1:].contiguous()
 
-        outputs = llm(
-            inputs_embeds=combined_embeddings, attention_mask=combined_attention_mask
-        )
-        logits = outputs.logits
-
-        # Calculate loss only on the caption tokens
-        shift_logits = logits[..., visual_soft_tokens.shape[1] : -1, :].contiguous()
-        shift_labels = input_ids[..., 1:].contiguous()
-
-        loss = loss_fn(
-            shift_logits.view(-1, llm.config.vocab_size), shift_labels.view(-1)
-        )
-        loss.backward()
-        optimizer.step()
+            loss = loss_fn(
+                shift_logits.view(-1, llm.config.vocab_size), shift_labels.view(-1)
+            )
+        
+        # Scale the loss, perform backward pass, and update weights
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         total_loss += loss.item()
 
