@@ -12,21 +12,23 @@
 
 # Load modules
 module purge
+module load GCC/11.3.0
+module load OpenMPI/4.1.4
 module load CUDA/11.7.0
 
-# Activate virtual environment
+
+# Activate virtual environment (NOT conda)
 source ~/venv_moe_project/bin/activate
 
-# Completely override system Python paths
-unset PYTHONHOME
-export PYTHONPATH="/home/aticinovic/venv_moe_project/lib/python3.10/site-packages"
+# CRITICAL: Force virtual environment packages to override system packages
+export PYTHONPATH="/home/aticinovic/venv_moe_project/lib/python3.10/site-packages:${PYTHONPATH}"
 
 echo "=== VERIFICATION ==="
 python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
-python -c "import google.protobuf; print(f'Protobuf version: {google.protobuf.__version__}')"
 
+# Rest of your script...
 cd $HOME/MoE-Specialisation
-export PYTHONPATH="${PWD}:/home/aticinovic/venv_moe_project/lib/python3.10/site-packages"
+export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
 echo "Starting training script..."
 python training_scripts/train_stage_1.py
