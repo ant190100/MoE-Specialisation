@@ -92,13 +92,15 @@ for epoch in range(NUM_EPOCHS):
         
         total_loss += loss.item()
 
+        if i % 100 == 0:
+        print(f"Epoch [{epoch+1}/{NUM_EPOCHS}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}")
+
         # Clean up intermediate tensors
         del visual_outputs, patch_embeddings, text_embeddings, visual_soft_tokens
         del combined_embeddings, visual_attention_mask, combined_attention_mask
         del outputs, logits, shift_logits, shift_labels, loss
 
-        if i % 100 == 0:
-            print(f"Epoch [{epoch+1}/{NUM_EPOCHS}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}")
+
 
     print(f"Epoch {epoch+1} Average Loss: {total_loss / len(train_loader):.4f}")
         # Add memory cleanup between epochs
