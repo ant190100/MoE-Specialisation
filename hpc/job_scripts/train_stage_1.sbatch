@@ -16,6 +16,13 @@ module purge
 # Load only CUDA, not Python (let conda handle Python)
 module load CUDA/11.7.0
 
+# Set CUDA environment variables
+export CUDA_VISIBLE_DEVICES=0
+export CUDA_HOME=/usr/local/cuda-11.7
+
+echo "CUDA setup:"
+echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
+nvidia-smi
 
 # Initialize conda
 source $HOME/.bashrc
