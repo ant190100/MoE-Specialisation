@@ -11,10 +11,10 @@ paths:
 
 # Training parameters for Stage 1
 training_stage1:
-  num_epochs: 5
+  num_epochs: 10
   batch_size: 8
   learning_rate: 0.0001
-  subset_fraction: 0.05
+  subset_fraction: 0.1
 
 # Dataloader parameters
 dataloader:

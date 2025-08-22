@@ -61,6 +61,12 @@ print("✅ Models loaded and frozen.")
 # --- 3. Instantiate Your Custom Components ---
 print("Instantiating custom components...")
 vision_connector = VisionLanguageConnector().to(DEVICE)
+
+weights_path = "/data/gpfs/projects/COMP90055/aticinovic/outputs/vision_connector_stage1.pth"
+if os.path.exists(weights_path):
+    print(f"Loading saved weights from {weights_path}")
+    vision_connector.load_state_dict(torch.load(weights_path))
+    
 dataset = COCO_Loader(
     image_dir=paths["image_dir"],
     annotations_file=paths["annotations_file"],
