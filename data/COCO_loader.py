@@ -1,9 +1,8 @@
 import os
-import random
+import json
 from PIL import Image
 from torch.utils.data import Dataset
-from pycocotools.coco import COCO
-
+import random
 
 class COCO_Loader(Dataset):
     def __init__(
@@ -13,55 +12,61 @@ class COCO_Loader(Dataset):
         clip_processor,
         tokenizer,
         subset_fraction=1.0,
+        split="train", 
+        val_split_fraction=0.1,
     ):
         self.image_dir = image_dir
-        self.coco = COCO(annotations_file)
-
-        all_ids = list(sorted(self.coco.imgs.keys()))
-
-        # --- MODIFICATION START ---
-        # If a fraction less than 1.0 is specified, take a random subset
-        if subset_fraction < 1.0:
-            num_samples = int(len(all_ids) * subset_fraction)
-            self.ids = random.sample(all_ids, num_samples)
-            print(
-                f"Using a random subset of {num_samples} images ({subset_fraction*100:.1f}% of total)."
-            )
-        else:
-            self.ids = all_ids
-
-        # 2. Store processors
         self.clip_processor = clip_processor
         self.tokenizer = tokenizer
 
+        with open(annotations_file, "r") as f:
+            self.annotations = json.load(f)["annotations"]
+
+        # Shuffle and subset the data
+        random.seed(42) # Add seed for reproducibility
+        random.shuffle(self.annotations)
+        subset_size = int(len(self.annotations) * subset_fraction)
+        self.annotations = self.annotations[:subset_size]
+
+        # Split the data into training and validation sets
+        split_index = int(len(self.annotations) * (1 - val_split_fraction))
+        if split == "train":
+            self.annotations = self.annotations[:split_index]
+            print(f"Using {len(self.annotations)} images for training.")
+        elif split == "val":
+            self.annotations = self.annotations[split_index:]
+            print(f"Using {len(self.annotations)} images for validation.")
+
     def __len__(self):
-        return len(self.ids)
+        return len(self.annotations)
 
     def __getitem__(self, idx):
-        # 3. On-demand data loading
-        img_id = self.ids[idx]
+        annotation = self.annotations[idx]
+        # Construct image path safely, handling potential missing leading zeros in image_id
+        image_filename = f"{annotation['image_id']:012d}.jpg"
+        image_path = os.path.join(self.image_dir, image_filename)
 
-        path = self.coco.loadImgs(img_id)[0]["file_name"]
-        image = Image.open(os.path.join(self.image_dir, path)).convert("RGB")
+        try:
+            image = Image.open(image_path).convert("RGB")
+        except FileNotFoundError:
+            print(f"Warning: Image file not found at {image_path}. Skipping.")
+            # Return None or a placeholder to be handled in the dataloader's collate_fn if needed
+            return None
 
-        ann_ids = self.coco.getAnnIds(imgIds=img_id)
-        anns = self.coco.loadAnns(ann_ids)
-        caption = anns[0]["caption"]
+        caption = annotation["caption"]
 
-        # 4. Apply transformations
         image_processed = self.clip_processor(
             images=image, return_tensors="pt"
-        ).pixel_values
-        text_tokenized = self.tokenizer(
+        ).pixel_values.squeeze(0)
+
+        tokenized_caption = self.tokenizer(
             caption,
             return_tensors="pt",
             padding="max_length",
-            max_length=64,
             truncation=True,
+            max_length=128,
         )
+        input_ids = tokenized_caption["input_ids"].squeeze(0)
+        attention_mask = tokenized_caption["attention_mask"].squeeze(0)
 
-        return (
-            image_processed.squeeze(0),
-            text_tokenized.input_ids.squeeze(0),
-            text_tokenized.attention_mask.squeeze(0),
-        )
+        return image_processed, input_ids, attention_mask
