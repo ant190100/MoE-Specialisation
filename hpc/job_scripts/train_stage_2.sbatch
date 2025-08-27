@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
-#SBATCH --time=01:30:00
+#SBATCH --mem=96G
+#SBATCH --time=00:10:00
 #SBATCH --output=../out_slurm/train_stage_2/train_stage_2_%j.out
 #SBATCH --error=../err_slurm/train_stage_2/train_stage_2_%j.err
 
