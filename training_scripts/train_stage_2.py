@@ -92,18 +92,21 @@ if os.path.exists(stage1_weights_path):
 else:
     print("🚨 WARNING: Stage 1 weights not found. Connector is randomly initialized.")
 
-# Freeze all non-expert components
+# --- Freeze and Unfreeze Components for Stage 2 ---
 print("Preparing model for Stage 2 training...")
 # Freeze all components first
 for param in vision_encoder.parameters(): param.requires_grad = False
 for param in vision_connector.parameters(): param.requires_grad = False
 for param in llm.parameters(): param.requires_grad = False
+print("✅ All models initially frozen.")
 
-# Selectively unfreeze ONLY the expert weights for training
-for name, param in llm.named_parameters():
-    if "mlp.experts" in name:
-        param.requires_grad = True
-print("✅ All components frozen except MoE experts.")
+# --- Selectively unfreeze ONLY the expert weights for training ---
+# We iterate through the decoder layers to access the custom MoELayer directly
+for layer in llm.model.layers:
+    for expert in layer.mlp.experts:
+        for param in expert.parameters():
+            param.requires_grad = True
+print("✅ MoE expert weights have been unfrozen.")
 
 # ====================================================================================
 # 3. DATA PIPELINE
@@ -143,6 +146,11 @@ val_loader = DataLoader(
 # ====================================================================================
 trainable_params = [p for p in llm.parameters() if p.requires_grad]
 optimizer = optim.AdamW(trainable_params, lr=train_params["learning_rate"])
+
+# Check if the optimizer has parameters before proceeding
+if not trainable_params:
+    raise ValueError("No trainable parameters found for the optimizer. Check the unfreezing logic.")
+
 loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 scaler = GradScaler()
 loss_history = {"train": [], "val": []}
