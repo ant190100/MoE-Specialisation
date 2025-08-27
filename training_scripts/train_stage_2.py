@@ -62,9 +62,26 @@ clip_processor = AutoProcessor.from_pretrained(paths["clip_local_path"])
 tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"])
 tokenizer.pad_token = tokenizer.eos_token
 
-# Load base LLM and perform surgical replacement
-llm = MistralForCausalLM.from_pretrained(paths["mistral_local_path"], load_in_8bit=True)
-llm = replace_ffn_with_moe(llm)
+# 1. Load the FULL PRECISION base LLM from disk
+llm_base = MistralForCausalLM.from_pretrained(paths["mistral_local_path"])
+
+# 2. Perform the surgical replacement on the full-precision model
+llm_moe_base = replace_ffn_with_moe(llm_base)
+
+# 3. Now, quantize the ENTIRE modified MoE model
+print("Quantizing the new MoE model to 8-bit...")
+llm = MistralForCausalLM.from_pretrained(
+    paths["mistral_local_path"], # Load config from path
+    load_in_8bit=True,
+)
+# Manually load the modified MoE state dict into the quantized model shell
+llm.load_state_dict(llm_moe_base.state_dict())
+print("✅ MoE model quantized.")
+
+# Clean up to save memory
+del llm_base
+del llm_moe_base
+gc.collect()
 
 # Load trained Stage 1 Vision Connector
 vision_connector = VisionLanguageConnector().to(DEVICE)
