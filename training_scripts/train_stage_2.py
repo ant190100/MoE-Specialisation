@@ -93,15 +93,17 @@ else:
     print("🚨 WARNING: Stage 1 weights not found. Connector is randomly initialized.")
 
 # Freeze all non-expert components
-print("Freezing non-expert components...")
-for param in vision_encoder.parameters():
-    param.requires_grad = False
-for param in vision_connector.parameters():
-    param.requires_grad = False
+print("Preparing model for Stage 2 training...")
+# Freeze all components first
+for param in vision_encoder.parameters(): param.requires_grad = False
+for param in vision_connector.parameters(): param.requires_grad = False
+for param in llm.parameters(): param.requires_grad = False
+
+# Selectively unfreeze ONLY the expert weights for training
 for name, param in llm.named_parameters():
-    if "mlp.experts" not in name:
-        param.requires_grad = False
-print("✅ Components frozen.")
+    if "mlp.experts" in name:
+        param.requires_grad = True
+print("✅ All components frozen except MoE experts.")
 
 # ====================================================================================
 # 3. DATA PIPELINE
