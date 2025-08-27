@@ -44,7 +44,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {DEVICE}")
 
 # ====================================================================================
-# 2. MODEL LOADING AND SETUP
+# 3. MODEL LOADING
 # ====================================================================================
 print("Loading foundational models...")
 vision_encoder = CLIPVisionModel.from_pretrained(paths["clip_local_path"]).to(DEVICE)
@@ -52,29 +52,15 @@ clip_processor = AutoProcessor.from_pretrained(paths["clip_local_path"])
 tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"])
 tokenizer.pad_token = tokenizer.eos_token
 
-# --- Definitive Loading Workflow ---
-checkpoint_dir = os.path.join(OUTPUT_DIR, "stage2_checkpoint")
-model_path = paths["mistral_local_path"]
-loading_from_checkpoint = os.path.exists(checkpoint_dir)
-
-if loading_from_checkpoint:
-    print(f"💾 Found checkpoint, preparing to resume from: {checkpoint_dir}")
-    model_path = checkpoint_dir # Use the checkpoint path for loading
-
-# Load the configuration and explicitly set the model type to our custom one
-config = AutoConfig.from_pretrained(model_path)
-config.model_type = "mistral_moe"
-
-# Now, load the model using the modified config
-print(f"Loading weights from {model_path} into custom MoE architecture...")
+# Load the base model with the custom MoE architecture
+print("Loading pre-trained weights into custom MoE architecture...")
 llm = AutoModelForCausalLM.from_pretrained(
-    model_path,
-    config=config, # Pass the modified config
+    paths["mistral_local_path"],
+    model_type="mistral_moe",
     trust_remote_code=True,
     load_in_8bit=True
 )
 print("✅ LLM with MoE layers is ready.")
-
 
 # --- Load Trained Stage 1 Vision Connector ---
 vision_connector = VisionLanguageConnector().to(DEVICE)
@@ -84,40 +70,6 @@ if os.path.exists(stage1_weights_path):
     vision_connector.load_state_dict(torch.load(stage1_weights_path))
 else:
     print("🚨 WARNING: Stage 1 weights not found.")
-
-
-# --- Freeze/Unfreeze Parameters ---
-print("Preparing model for Stage 2 training...")
-for param in vision_encoder.parameters(): param.requires_grad = False
-for param in vision_connector.parameters(): param.requires_grad = False
-for param in llm.parameters(): param.requires_grad = False
-for layer in llm.model.layers:
-    for expert in layer.mlp.experts:
-        for param in expert.parameters():
-            param.requires_grad = True
-print("✅ All components frozen except MoE experts.")
-
-# --- Optimizer and Loss Setup ---
-trainable_params = [p for p in llm.parameters() if p.requires_grad]
-optimizer = optim.AdamW(trainable_params, lr=train_params["learning_rate"])
-scaler = GradScaler()
-loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
-loss_history = {"train": [], "val": []}
-start_epoch = 0
-
-# --- Resume Optimizer, Scaler, and History from Checkpoint ---
-if os.path.exists(os.path.join(checkpoint_dir, "optimizer.pt")):
-    print(f"💾 Resuming optimizer and scaler state from {checkpoint_dir}")
-    optimizer.load_state_dict(torch.load(os.path.join(checkpoint_dir, "optimizer.pt")))
-    scaler.load_state_dict(torch.load(os.path.join(checkpoint_dir, "scaler.pt")))
-    
-    loss_path = os.path.join(OUTPUT_DIR, "loss_history_stage2.json")
-    if os.path.exists(loss_path):
-        with open(loss_path, "r") as f:
-            loss_history = json.load(f)
-        start_epoch = len(loss_history["train"])
-
-print(f"Optimizing {sum(p.numel() for p in trainable_params)} parameters, starting from epoch {start_epoch + 1}.")
 
 # ====================================================================================
 # 4. DATA PIPELINE
@@ -171,28 +123,14 @@ trainable_params = [p for p in llm.parameters() if p.requires_grad]
 optimizer = optim.AdamW(trainable_params, lr=train_params["learning_rate"])
 scaler = GradScaler()
 loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
-loss_history = {"train": [], "val": []}
-start_epoch = 0
 
-# --- Resume Optimizer, Scaler, and History from Checkpoint ---
-if os.path.exists(os.path.join(checkpoint_dir, "optimizer.pt")):
-    print(f"💾 Resuming optimizer and scaler state from {checkpoint_dir}")
-    optimizer.load_state_dict(torch.load(os.path.join(checkpoint_dir, "optimizer.pt")))
-    scaler.load_state_dict(torch.load(os.path.join(checkpoint_dir, "scaler.pt")))
-    
-    loss_path = os.path.join(OUTPUT_DIR, "loss_history_stage2.json")
-    if os.path.exists(loss_path):
-        with open(loss_path, "r") as f:
-            loss_history = json.load(f)
-        start_epoch = len(loss_history["train"])
-
-print(f"Optimizing {sum(p.numel() for p in trainable_params)} parameters, starting from epoch {start_epoch + 1}.")
+print(f"Optimizing {sum(p.numel() for p in trainable_params)} trainable parameters.")
 
 # ====================================================================================
 # 6. STAGE 2 TRAINING LOOP
 # ====================================================================================
-print(f"🚀 Starting Stage 2 training from epoch {start_epoch + 1}...")
-for epoch in range(start_epoch, NUM_EPOCHS):
+print(f"🚀 Starting Stage 2 training for {NUM_EPOCHS} epochs...")
+for epoch in range(NUM_EPOCHS):
     # --- Training Phase ---
     llm.train()
     total_train_loss = 0
@@ -226,7 +164,6 @@ for epoch in range(start_epoch, NUM_EPOCHS):
         scaler.update()
         total_train_loss += loss.item()
     avg_train_loss = total_train_loss / len(train_loader)
-    loss_history["train"].append(avg_train_loss)
     print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] - Training Loss: {avg_train_loss:.4f}")
 
     # --- Validation Phase ---
@@ -238,6 +175,7 @@ for epoch in range(start_epoch, NUM_EPOCHS):
                 images.to(DEVICE), input_ids.to(DEVICE), attention_mask.to(DEVICE)
             )
             with autocast():
+                # ... (validation forward pass logic is the same as training) ...
                 patch_embeddings = vision_encoder(images).last_hidden_state
                 visual_soft_tokens = vision_connector(patch_embeddings)
                 text_embeddings = llm.model.embed_tokens(input_ids)
@@ -258,18 +196,6 @@ for epoch in range(start_epoch, NUM_EPOCHS):
                 loss = loss_fn(shift_logits.view(-1, llm.config.vocab_size), shift_labels.view(-1))
             total_val_loss += loss.item()
     avg_val_loss = total_val_loss / len(val_loader)
-    loss_history["val"].append(avg_val_loss)
     print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] - Validation Loss: {avg_val_loss:.4f}")
 
-    # --- Checkpointing ---
-    llm.save_pretrained(checkpoint_dir)
-    tokenizer.save_pretrained(checkpoint_dir)
-    torch.save(optimizer.state_dict(), os.path.join(checkpoint_dir, "optimizer.pt"))
-    torch.save(scaler.state_dict(), os.path.join(checkpoint_dir, "scaler.pt"))
-    print(f"💾 Checkpoint saved to {checkpoint_dir} after epoch {epoch+1}")
-    
-    loss_path = os.path.join(OUTPUT_DIR, "loss_history_stage2.json")
-    with open(loss_path, "w") as f:
-        json.dump(loss_history, f)
-
-print("✅ Stage 2 training complete.")
+print("✅ Training complete.")
