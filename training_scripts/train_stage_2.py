@@ -52,27 +52,29 @@ clip_processor = AutoProcessor.from_pretrained(paths["clip_local_path"])
 tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"])
 tokenizer.pad_token = tokenizer.eos_token
 
-# --- Corrected Loading Workflow ---
+# --- Definitive Loading Workflow ---
 checkpoint_dir = os.path.join(OUTPUT_DIR, "stage2_checkpoint")
-if os.path.exists(checkpoint_dir):
-    print(f"💾 Resuming from checkpoint: {checkpoint_dir}")
-    # If a checkpoint exists, load it directly with the custom architecture
-    llm = AutoModelForCausalLM.from_pretrained(
-        checkpoint_dir,
-        model_type="mistral_moe",
-        trust_remote_code=True,
-        load_in_8bit=True
-    )
-else:
-    print("Loading pre-trained weights into new custom MoE architecture...")
-    # If no checkpoint, load the base model with the custom architecture
-    llm = AutoModelForCausalLM.from_pretrained(
-        paths["mistral_local_path"],
-        model_type="mistral_moe",
-        trust_remote_code=True,
-        load_in_8bit=True
-    )
+model_path = paths["mistral_local_path"]
+loading_from_checkpoint = os.path.exists(checkpoint_dir)
+
+if loading_from_checkpoint:
+    print(f"💾 Found checkpoint, preparing to resume from: {checkpoint_dir}")
+    model_path = checkpoint_dir # Use the checkpoint path for loading
+
+# Load the configuration and explicitly set the model type to our custom one
+config = AutoConfig.from_pretrained(model_path)
+config.model_type = "mistral_moe"
+
+# Now, load the model using the modified config
+print(f"Loading weights from {model_path} into custom MoE architecture...")
+llm = AutoModelForCausalLM.from_pretrained(
+    model_path,
+    config=config, # Pass the modified config
+    trust_remote_code=True,
+    load_in_8bit=True
+)
 print("✅ LLM with MoE layers is ready.")
+
 
 # --- Load Trained Stage 1 Vision Connector ---
 vision_connector = VisionLanguageConnector().to(DEVICE)
