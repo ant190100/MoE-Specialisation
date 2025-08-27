@@ -27,5 +27,5 @@ echo "--------------------------"
 # --- Run the Script ---
 cd $HOME/MoE-Specialisation
 echo "Starting model creation script..."
-python training_scripts/create_moe_model.py
+python models/utils/create_moe_model.py
 echo "Script finished."
