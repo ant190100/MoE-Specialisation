@@ -159,8 +159,14 @@ start_epoch = 0
 checkpoint_dir = os.path.join(OUTPUT_DIR, "stage2_checkpoint")
 if os.path.exists(checkpoint_dir):
     print(f"💾 Resuming from checkpoint: {checkpoint_dir}")
-    # Reload the model state (which includes the specialized experts)
-    llm = MistralForCausalLM.from_pretrained(checkpoint_dir).to(DEVICE)
+    # Tell from_pretrained to use your custom MoE architecture
+    llm = AutoModelForCausalLM.from_pretrained(
+        checkpoint_dir,
+        model_type="mistral_moe", # Specify your custom model type
+        trust_remote_code=True,
+        load_in_8bit=True
+    )
+    print("✅ Checkpoint loaded with custom MoE architecture.")
     # Note: We re-apply freezing just in case, though save_pretrained should handle it
     for name, param in llm.named_parameters():
         if "mlp.experts" not in name:
