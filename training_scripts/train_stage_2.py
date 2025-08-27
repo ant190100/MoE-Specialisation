@@ -52,15 +52,17 @@ clip_processor = AutoProcessor.from_pretrained(paths["clip_local_path"])
 tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"])
 tokenizer.pad_token = tokenizer.eos_token
 
-# Load the base model with the custom MoE architecture
-print("Loading pre-trained weights into custom MoE architecture...")
+# --- Simplified and Robust Loading ---
+# This path should point to the MoE model you created with the 'create_moe_model.py' script
+moe_model_path = os.path.join(paths["output_dir"], "Mistral-7B-MoE") 
+
+print(f"Loading custom MoE model from {moe_model_path}...")
 llm = AutoModelForCausalLM.from_pretrained(
-    paths["mistral_local_path"],
-    model_type="mistral_moe",
-    trust_remote_code=True,
+    moe_model_path,
+    trust_remote_code=True, # Trust your custom model files
     load_in_8bit=True
 )
-print("✅ LLM with MoE layers is ready.")
+print("✅ Custom MoE model loaded and quantized.")
 
 # --- Load Trained Stage 1 Vision Connector ---
 vision_connector = VisionLanguageConnector().to(DEVICE)
@@ -175,7 +177,6 @@ for epoch in range(NUM_EPOCHS):
                 images.to(DEVICE), input_ids.to(DEVICE), attention_mask.to(DEVICE)
             )
             with autocast():
-                # ... (validation forward pass logic is the same as training) ...
                 patch_embeddings = vision_encoder(images).last_hidden_state
                 visual_soft_tokens = vision_connector(patch_embeddings)
                 text_embeddings = llm.model.embed_tokens(input_ids)
