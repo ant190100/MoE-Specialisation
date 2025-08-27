@@ -62,46 +62,16 @@ clip_processor = AutoProcessor.from_pretrained(paths["clip_local_path"])
 tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"])
 tokenizer.pad_token = tokenizer.eos_token
 
-# 1. Load the FULL PRECISION base LLM from disk
-print("Loading full-precision base LLM for surgery...")
-llm_base = MistralForCausalLM.from_pretrained(paths["mistral_local_path"])
-
-# 2. Perform the surgical replacement on the full-precision model
-llm_moe_full_precision = replace_ffn_with_moe(llm_base)
-
-# 3. Now, load a new model with the quantization flag AND our custom architecture
-print("Quantizing the new MoE model to 8-bit...")
+# 1. Load the base LLM directly into 8-bit on the GPU
+print("Loading and quantizing base LLM to 8-bit...")
 llm = MistralForCausalLM.from_pretrained(
     paths["mistral_local_path"],
-    load_in_8bit=True,
-)
-# This step is tricky because the architectures don't match.
-# Instead of a direct load_state_dict, we must manually copy the weights
-# from the modified full-precision model to the quantized one.
-
-# This is a simplified example; real implementation might need more care
-# to handle the quantized weight formats. For now, let's assume direct copy for concept.
-# A better approach if this fails is to save the modified llm_moe_full_precision
-# and then load it with from_pretrained(..., load_in_8bit=True).
-
-# Let's try the save-and-reload pattern which is more robust
-temp_save_dir = os.path.join(OUTPUT_DIR, "temp_moe_model")
-print(f"Temporarily saving modified model to {temp_save_dir}...")
-llm_moe_full_precision.save_pretrained(temp_save_dir)
-
-print("Reloading model from temporary directory with 8-bit quantization...")
-llm = MistralForCausalLM.from_pretrained(
-    temp_save_dir,
     load_in_8bit=True
 )
-print("✅ MoE model successfully quantized.")
+print("✅ Base LLM loaded and quantized.")
 
-# Clean up to save memory
-import shutil
-del llm_base
-del llm_moe_full_precision
-shutil.rmtree(temp_save_dir)
-gc.collect()
+# 2. Perform surgical replacement on the now-quantized model
+llm = replace_ffn_with_moe(llm)
 
 # Load trained Stage 1 Vision Connector
 vision_connector = VisionLanguageConnector().to(DEVICE)
