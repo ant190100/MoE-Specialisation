@@ -5,7 +5,7 @@ from transformers.models.mistral.modeling_mistral import MistralMLP
 
 
 class MoELayer(nn.Module):
-    def __init__(self, d_model: int, num_experts: int = 2):
+    def __init__(self, config, d_model: int, num_experts: int = 2):
         super().__init__()
         self.d_model = d_model
         self.num_experts = num_experts

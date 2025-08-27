@@ -26,7 +26,7 @@ def replace_ffn_with_moe(model: MistralForCausalLM) -> MistralForCausalLM:
     for i, layer in enumerate(model.model.layers):
         original_ffn = layer.mlp
         d_model = original_ffn.gate_proj.in_features
-        moe_layer = MoELayer(d_model=d_model, num_experts=2)
+        moe_layer = MoELayer(model.config, d_model=d_model, num_experts=2)
 
         # Initialize both experts with the original FFN's weights
         moe_layer.experts[0].load_state_dict(original_ffn.state_dict())
