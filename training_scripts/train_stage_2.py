@@ -11,11 +11,20 @@ from transformers import (
     AutoTokenizer,
     MistralForCausalLM,
     CLIPVisionModel,
+    AutoConfig,
+    AutoModelForCausalLM
 )
 from models import VisionLanguageConnector, MoELayer  # Make sure to import MoELayer
 from data import COCO_Loader
 from torch.cuda.amp import autocast, GradScaler
+from models.custom_mistral import MistralMoEConfig, MistralMoEForCausalLM
 
+# --- 1. Register Your Custom Architecture ---
+# This tells the AutoModel classes how to handle the "mistral_moe" model type.
+print("Registering custom MistralMoE architecture...")
+AutoConfig.register("mistral_moe", MistralMoEConfig)
+AutoModelForCausalLM.register(MistralMoEConfig, MistralMoEForCausalLM)
+print("✅ Custom architecture registered.")
 
 # ====================================================================================
 # 0. UTIL FCN TO INSERT MOE
@@ -62,17 +71,17 @@ clip_processor = AutoProcessor.from_pretrained(paths["clip_local_path"])
 tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"])
 tokenizer.pad_token = tokenizer.eos_token
 
-# 1. Load the FULL PRECISION base LLM from disk
-print("Loading full-precision base LLM...")
-llm = MistralForCausalLM.from_pretrained(paths["mistral_local_path"])
+# --- The New, Cleaner Loading Method ---
+print("Loading pre-trained weights into custom MoE architecture...")
 
-# 2. Perform the surgical replacement on the full-precision model
-llm = replace_ffn_with_moe(llm)
-
-# 3. Move the entire modified MoE model to the GPU
-print("Moving modified MoE model to GPU...")
-llm = llm.to(DEVICE)
-print("✅ MoE model is on the GPU.")
+# Tell from_pretrained to use your custom model type and trust your local code files
+llm = AutoModelForCausalLM.from_pretrained(
+    paths["mistral_local_path"],
+    model_type="mistral_moe", # Specify your custom model type
+    trust_remote_code=True,    # Allow it to use your local models/custom_mistral.py
+    load_in_8bit=True
+)
+print("✅ Base LLM loaded, quantized, and configured with MoE layers.")
 
 # Load trained Stage 1 Vision Connector
 vision_connector = VisionLanguageConnector().to(DEVICE)
