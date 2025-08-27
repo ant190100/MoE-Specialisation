@@ -14,7 +14,7 @@ class MoELayer(nn.Module):
         self.router = nn.Linear(d_model, num_experts)
 
         # The experts are a list of standard Mistral FFNs (MLPs)
-        self.experts = nn.ModuleList([MistralMLP() for _ in range(num_experts)])
+        self.experts = nn.ModuleList([MistralMLP(config) for _ in range(num_experts)])
 
     def forward(self, hidden_states: torch.Tensor):
         # The routing mask is passed as an attribute, not an argument
