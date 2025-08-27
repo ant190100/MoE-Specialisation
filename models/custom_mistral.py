@@ -1,4 +1,4 @@
-# In models/custom_mistral.py
+import torch.nn as nn
 
 from transformers import MistralForCausalLM, MistralConfig
 from transformers.models.mistral.modeling_mistral import MistralDecoderLayer
@@ -17,8 +17,7 @@ class MistralMoEDecoderLayer(MistralDecoderLayer):
     def __init__(self, config: MistralMoEConfig, layer_idx: int):
         super().__init__(config, layer_idx)
         # Replace the standard FFN with your MoE layer
-        self.mlp = MoELayer(config)
-
+        self.mlp = MoELayer(config=config, d_model=config.hidden_size)
 # 3. Define the final, complete model.
 #    This class inherits from the standard MistralForCausalLM but
 #    is hard-coded to use your custom MoEDecoderLayer for its construction.

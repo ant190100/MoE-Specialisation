@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=96G                 # Keep the high memory request
+#SBATCH --mem=256G                 # Keep the high memory request
 #SBATCH --time=00:20:00           # 20 minutes should be more than enough
 #SBATCH --output=../out_slurm/create_moe/create_moe_%j.out
 #SBATCH --error=../err_slurm/create_moe/create_moe_%j.err
@@ -23,6 +23,9 @@ echo "--- Environment Verification ---"
 which python
 python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
 echo "--------------------------"
+
+# --- Add this line to fix the import error ---
+export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
 # --- Run the Script ---
 cd $HOME/MoE-Specialisation

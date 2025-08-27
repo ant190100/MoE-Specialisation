@@ -5,7 +5,7 @@ import os
 # Import your custom model class and the replacement utility
 # Make sure these files are accessible (e.g., in models/ and utils/ folders)
 from models.custom_mistral import MistralMoEForCausalLM
-from utils import replace_ffn_with_moe
+from models.utils.create_n_experts import replace_ffn_with_moe
 
 # --- Configuration ---
 # Point to your downloaded base Mistral 7B model
