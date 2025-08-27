@@ -16,8 +16,8 @@ training_stage1:
   learning_rate: 0.0001
   subset_fraction: 0.1
 
-# Training parameters for Stage 1
-training_stage1:
+# Training parameters for Stage w
+training_stagew:
   num_epochs: 3
   batch_size: 8
   learning_rate: 0.0001
