@@ -44,7 +44,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {DEVICE}")
 
 # ====================================================================================
-# 3. MODEL LOADING AND ARCHITECTURAL MODIFICATION
+# 2. MODEL LOADING AND SETUP
 # ====================================================================================
 print("Loading foundational models...")
 vision_encoder = CLIPVisionModel.from_pretrained(paths["clip_local_path"]).to(DEVICE)
@@ -52,11 +52,11 @@ clip_processor = AutoProcessor.from_pretrained(paths["clip_local_path"])
 tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"])
 tokenizer.pad_token = tokenizer.eos_token
 
-# --- Check for existing checkpoint before loading ---
+# --- Corrected Loading Workflow ---
 checkpoint_dir = os.path.join(OUTPUT_DIR, "stage2_checkpoint")
 if os.path.exists(checkpoint_dir):
     print(f"💾 Resuming from checkpoint: {checkpoint_dir}")
-    # Load the custom MoE architecture from the checkpoint
+    # If a checkpoint exists, load it directly with the custom architecture
     llm = AutoModelForCausalLM.from_pretrained(
         checkpoint_dir,
         model_type="mistral_moe",
@@ -64,15 +64,15 @@ if os.path.exists(checkpoint_dir):
         load_in_8bit=True
     )
 else:
-    print("Loading pre-trained weights into custom MoE architecture...")
-    # Load from the base model path if no checkpoint exists
+    print("Loading pre-trained weights into new custom MoE architecture...")
+    # If no checkpoint, load the base model with the custom architecture
     llm = AutoModelForCausalLM.from_pretrained(
         paths["mistral_local_path"],
         model_type="mistral_moe",
         trust_remote_code=True,
         load_in_8bit=True
     )
-print("✅ Base LLM loaded, quantized, and configured with MoE layers.")
+print("✅ LLM with MoE layers is ready.")
 
 # --- Load Trained Stage 1 Vision Connector ---
 vision_connector = VisionLanguageConnector().to(DEVICE)
@@ -82,6 +82,40 @@ if os.path.exists(stage1_weights_path):
     vision_connector.load_state_dict(torch.load(stage1_weights_path))
 else:
     print("🚨 WARNING: Stage 1 weights not found.")
+
+
+# --- Freeze/Unfreeze Parameters ---
+print("Preparing model for Stage 2 training...")
+for param in vision_encoder.parameters(): param.requires_grad = False
+for param in vision_connector.parameters(): param.requires_grad = False
+for param in llm.parameters(): param.requires_grad = False
+for layer in llm.model.layers:
+    for expert in layer.mlp.experts:
+        for param in expert.parameters():
+            param.requires_grad = True
+print("✅ All components frozen except MoE experts.")
+
+# --- Optimizer and Loss Setup ---
+trainable_params = [p for p in llm.parameters() if p.requires_grad]
+optimizer = optim.AdamW(trainable_params, lr=train_params["learning_rate"])
+scaler = GradScaler()
+loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
+loss_history = {"train": [], "val": []}
+start_epoch = 0
+
+# --- Resume Optimizer, Scaler, and History from Checkpoint ---
+if os.path.exists(os.path.join(checkpoint_dir, "optimizer.pt")):
+    print(f"💾 Resuming optimizer and scaler state from {checkpoint_dir}")
+    optimizer.load_state_dict(torch.load(os.path.join(checkpoint_dir, "optimizer.pt")))
+    scaler.load_state_dict(torch.load(os.path.join(checkpoint_dir, "scaler.pt")))
+    
+    loss_path = os.path.join(OUTPUT_DIR, "loss_history_stage2.json")
+    if os.path.exists(loss_path):
+        with open(loss_path, "r") as f:
+            loss_history = json.load(f)
+        start_epoch = len(loss_history["train"])
+
+print(f"Optimizing {sum(p.numel() for p in trainable_params)} parameters, starting from epoch {start_epoch + 1}.")
 
 # ====================================================================================
 # 4. DATA PIPELINE
