@@ -54,14 +54,14 @@ tokenizer.pad_token = tokenizer.eos_token
 
 # --- Simplified and Robust Loading ---
 # This path should point to the MoE model you created with the 'create_moe_model.py' script
-moe_model_path = os.path.join(paths["output_dir"], "Mistral-7B-MoE") 
+moe_model_path = "/data/gpfs/projects/COMP90055/aticinovic/models/Mistral-7B-MoE"
 
 print(f"Loading custom MoE model from {moe_model_path}...")
 llm = AutoModelForCausalLM.from_pretrained(
     moe_model_path,
     trust_remote_code=True, # Trust your custom model files
-    load_in_8bit=True
-)
+    local_files_only=True
+).to(DEVICE)
 print("✅ Custom MoE model loaded and quantized.")
 
 # --- Load Trained Stage 1 Vision Connector ---

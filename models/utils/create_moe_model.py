@@ -8,32 +8,32 @@ from models.custom_mistral import MistralMoEForCausalLM
 from models.utils.create_n_experts import replace_ffn_with_moe
 
 # --- Configuration ---
-# Point to your downloaded base Mistral 7B model
 base_model_path = "/data/gpfs/projects/COMP90055/aticinovic/models/Mistral-7B-v0.3" 
-# Define where the new, custom MoE model will be saved
 output_path = "/data/gpfs/projects/COMP90055/aticinovic/models/Mistral-7B-MoE"
 
 # 1. Load the full-precision base model
 print(f"Loading base model from {base_model_path}...")
 llm_base = MistralForCausalLM.from_pretrained(base_model_path)
 
-# 2. Perform the surgical replacement
-llm_moe = replace_ffn_with_moe(llm_base)
-
-# 3. Create an instance of your custom MoE model class
+# 2. Create an instance of your custom MoE model class
 print("Creating new MistralMoEForCausalLM model instance...")
-# Initialize with the config of the now-modified base model
-final_moe_model = MistralMoEForCausalLM(llm_moe.config)
+llm_moe = MistralMoEForCausalLM(llm_base.config)
 
-# 4. Load the modified weights into your custom model instance
-final_moe_model.load_state_dict(llm_moe.state_dict())
-print("✅ Weights loaded into custom architecture.")
+# 3. Manually copy weights
+print("Manually copying weights...")
+# Copy all non-MLP weights (e.g., embeddings, attention layers)
+llm_moe.load_state_dict(llm_base.state_dict(), strict=False)
+# Manually copy the original FFN weights into BOTH experts in each layer
+for layer_base, layer_moe in zip(llm_base.model.layers, llm_moe.model.layers):
+    layer_moe.mlp.experts[0].load_state_dict(layer_base.mlp.state_dict())
+    layer_moe.mlp.experts[1].load_state_dict(layer_base.mlp.state_dict())
+print("✅ Weights successfully copied.")
 
-# 5. CRITICAL: Update the model's config to reflect the new architecture
-final_moe_model.config.model_type = "mistral_moe"
-final_moe_model.config.architectures = ["MistralMoEForCausalLM"]
+# 4. Update the model's config to reflect the new architecture
+llm_moe.config.model_type = "mistral_moe"
+llm_moe.config.architectures = ["MistralMoEForCausalLM"]
 
-# 6. Save the new, custom MoE model
+# 5. Save the new, custom MoE model
 print(f"Saving new MoE model to {output_path}...")
-final_moe_model.save_pretrained(output_path)
+llm_moe.save_pretrained(output_path)
 print("✅ MoE model successfully created.")
