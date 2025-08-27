@@ -63,7 +63,7 @@ tokenizer = AutoTokenizer.from_pretrained(paths["mistral_local_path"])
 tokenizer.pad_token = tokenizer.eos_token
 
 # Load base LLM and perform surgical replacement
-llm = MistralForCausalLM.from_pretrained(paths["mistral_local_path"])
+llm = MistralForCausalLM.from_pretrained(paths["mistral_local_path"], load_in_8bit=True)
 llm = replace_ffn_with_moe(llm)
 
 # Load trained Stage 1 Vision Connector
