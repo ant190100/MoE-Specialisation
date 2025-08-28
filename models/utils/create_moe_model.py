@@ -1,6 +1,7 @@
 import torch
-from transformers import MistralForCausalLM, AutoConfig
+import json
 import os
+from transformers import MistralForCausalLM, AutoConfig, AutoTokenizer
 
 # Import your custom model class and the replacement utility
 # Make sure these files are accessible (e.g., in models/ and utils/ folders)
@@ -36,4 +37,32 @@ llm_moe.config.architectures = ["MistralMoEForCausalLM"]
 # 5. Save the new, custom MoE model
 print(f"Saving new MoE model to {output_path}...")
 llm_moe.save_pretrained(output_path)
-print("✅ MoE model successfully created.")
+
+# 6. **KEY FIX**: Add auto_map to config.json for proper loading
+print("Updating config.json with auto_map...")
+config_path = os.path.join(output_path, "config.json")
+with open(config_path, "r") as f:
+    config_dict = json.load(f)
+
+# Add auto_map to tell transformers where to find your custom classes
+config_dict["auto_map"] = {
+    "AutoConfig": "models.custom_mistral.MistralMoEConfig",
+    "AutoModelForCausalLM": "models.custom_mistral.MistralMoEForCausalLM"
+}
+
+with open(config_path, "w") as f:
+    json.dump(config_dict, f, indent=2)
+
+# 7. Copy your custom model files to the output directory
+print("Copying custom model files...")
+import shutil
+model_files = [
+    "models/custom_mistral.py",
+    "models/utils/create_n_experts.py"
+]
+for file_path in model_files:
+    if os.path.exists(file_path):
+        shutil.copy2(file_path, output_path)
+        print(f"Copied {file_path}")
+
+print("✅ MoE model successfully created with proper loading configuration.")
