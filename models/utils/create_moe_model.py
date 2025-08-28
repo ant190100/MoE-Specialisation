@@ -45,9 +45,10 @@ with open(config_path, "r") as f:
     config_dict = json.load(f)
 
 # Add auto_map to tell transformers where to find your custom classes
+# Fixed format: "filename.ClassName" not "path.to.filename.ClassName"
 config_dict["auto_map"] = {
-    "AutoConfig": "models.custom_mistral.MistralMoEConfig",
-    "AutoModelForCausalLM": "models.custom_mistral.MistralMoEForCausalLM"
+    "AutoConfig": "custom_mistral.MistralMoEConfig",
+    "AutoModelForCausalLM": "custom_mistral.MistralMoEForCausalLM"
 }
 
 with open(config_path, "w") as f:
@@ -62,7 +63,10 @@ model_files = [
 ]
 for file_path in model_files:
     if os.path.exists(file_path):
-        shutil.copy2(file_path, output_path)
-        print(f"Copied {file_path}")
+        # Copy to the root of the output directory with just the filename
+        filename = os.path.basename(file_path)
+        dest_path = os.path.join(output_path, filename)
+        shutil.copy2(file_path, dest_path)
+        print(f"Copied {file_path} to {dest_path}")
 
 print("✅ MoE model successfully created with proper loading configuration.")
