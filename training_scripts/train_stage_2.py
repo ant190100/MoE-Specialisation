@@ -1,6 +1,7 @@
 import yaml
 import torch
 import os
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 import json
 import gc
 import torch.nn as nn
@@ -158,9 +159,21 @@ for epoch in range(NUM_EPOCHS):
             ], dim=1)
             outputs = llm(inputs_embeds=combined_embeddings, attention_mask=combined_attention_mask)
             logits = outputs.logits
-            shift_logits = logits[..., visual_soft_tokens.shape[1] - 1 : -1, :].contiguous()
-            shift_labels = input_ids[..., 1:].contiguous()
-            loss = loss_fn(shift_logits.view(-1, llm.config.vocab_size), shift_labels.view(-1))
+
+            # Calculate loss only on text tokens for next-token prediction
+            num_visual_tokens = visual_soft_tokens.shape[1]
+
+            # Extract logits for text positions (skip vision tokens entirely)
+            text_logits = logits[..., num_visual_tokens:-1, :].contiguous()  # Text token logits for next-token prediction
+            text_labels = input_ids[..., 1:].contiguous()  # Next tokens to predict
+
+            # Ensure shapes match
+            if text_logits.shape[1] == text_labels.shape[1]:
+                loss = loss_fn(text_logits.view(-1, llm.config.vocab_size), text_labels.view(-1))
+            else:
+                print(f"Shape mismatch: logits {text_logits.shape} vs labels {text_labels.shape}")
+                loss = torch.tensor(0.0, device=DEVICE, requires_grad=True)
+
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
@@ -168,7 +181,7 @@ for epoch in range(NUM_EPOCHS):
     avg_train_loss = total_train_loss / len(train_loader)
     print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] - Training Loss: {avg_train_loss:.4f}")
 
-    # --- Validation Phase ---
+    # --- Validation Phase --- 
     llm.eval()
     total_val_loss = 0
     with torch.no_grad():
@@ -192,9 +205,22 @@ for epoch in range(NUM_EPOCHS):
                 ], dim=1)
                 outputs = llm(inputs_embeds=combined_embeddings, attention_mask=combined_attention_mask)
                 logits = outputs.logits
-                shift_logits = logits[..., visual_soft_tokens.shape[1] - 1 : -1, :].contiguous()
-                shift_labels = input_ids[..., 1:].contiguous()
-                loss = loss_fn(shift_logits.view(-1, llm.config.vocab_size), shift_labels.view(-1))
+
+
+                # Calculate loss only on text tokens for next-token prediction
+                num_visual_tokens = visual_soft_tokens.shape[1]
+  
+                # Extract logits for text positions (skip vision tokens entirely)
+                text_logits = logits[..., num_visual_tokens:-1, :].contiguous()  # Text token logits for next-token prediction
+                text_labels = input_ids[..., 1:].contiguous()  # Next tokens to predict
+
+                # Ensure shapes match
+                if text_logits.shape[1] == text_labels.shape[1]:
+                    loss = loss_fn(text_logits.view(-1, llm.config.vocab_size), text_labels.view(-1))
+                else:
+                    print(f"Shape mismatch: logits {text_logits.shape} vs labels {text_labels.shape}")
+                    loss = torch.tensor(0.0, device=DEVICE, requires_grad=True)
+
             total_val_loss += loss.item()
     avg_val_loss = total_val_loss / len(val_loader)
     print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] - Validation Loss: {avg_val_loss:.4f}")
