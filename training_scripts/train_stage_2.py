@@ -159,7 +159,7 @@ for epoch in range(NUM_EPOCHS):
             outputs = llm(inputs_embeds=combined_embeddings, attention_mask=combined_attention_mask)
             logits = outputs.logits
             shift_logits = logits[..., visual_soft_tokens.shape[1] - 1 : -1, :].contiguous()
-            shift_labels = input_ids.contiguous()
+            shift_labels = input_ids[..., 1:].contiguous()
             loss = loss_fn(shift_logits.view(-1, llm.config.vocab_size), shift_labels.view(-1))
         scaler.scale(loss).backward()
         scaler.step(optimizer)
@@ -193,7 +193,7 @@ for epoch in range(NUM_EPOCHS):
                 outputs = llm(inputs_embeds=combined_embeddings, attention_mask=combined_attention_mask)
                 logits = outputs.logits
                 shift_logits = logits[..., visual_soft_tokens.shape[1] - 1 : -1, :].contiguous()
-                shift_labels = input_ids.contiguous()
+                shift_labels = input_ids[..., 1:].contiguous()
                 loss = loss_fn(shift_logits.view(-1, llm.config.vocab_size), shift_labels.view(-1))
             total_val_loss += loss.item()
     avg_val_loss = total_val_loss / len(val_loader)

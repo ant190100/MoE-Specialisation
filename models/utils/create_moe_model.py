@@ -45,7 +45,6 @@ with open(config_path, "r") as f:
     config_dict = json.load(f)
 
 # Add auto_map to tell transformers where to find your custom classes
-# Fixed format: "filename.ClassName" not "path.to.filename.ClassName"
 config_dict["auto_map"] = {
     "AutoConfig": "custom_mistral.MistralMoEConfig",
     "AutoModelForCausalLM": "custom_mistral.MistralMoEForCausalLM"
@@ -54,19 +53,41 @@ config_dict["auto_map"] = {
 with open(config_path, "w") as f:
     json.dump(config_dict, f, indent=2)
 
-# 7. Copy your custom model files to the output directory
+# 7. Copy ALL necessary Python files to the output directory
 print("Copying custom model files...")
 import shutil
-model_files = [
+import glob
+
+# Find all Python files that might be dependencies
+files_to_copy = []
+
+# Direct dependencies
+files_to_copy.extend([
     "models/custom_mistral.py",
-    "models/utils/create_n_experts.py"
-]
-for file_path in model_files:
+    "models/moe_layer.py", 
+    "models/__init__.py"
+])
+
+# Utils dependencies
+files_to_copy.extend([
+    "models/utils/create_n_experts.py",
+    "models/utils/__init__.py"
+])
+
+# Also check for any other Python files in models/
+for py_file in glob.glob("models/*.py"):
+    if py_file not in files_to_copy:
+        files_to_copy.append(py_file)
+
+print(f"Files to copy: {files_to_copy}")
+
+for file_path in files_to_copy:
     if os.path.exists(file_path):
-        # Copy to the root of the output directory with just the filename
         filename = os.path.basename(file_path)
         dest_path = os.path.join(output_path, filename)
         shutil.copy2(file_path, dest_path)
-        print(f"Copied {file_path} to {dest_path}")
+        print(f"✅ Copied {file_path} -> {dest_path}")
+    else:
+        print(f"⚠️  Warning: {file_path} not found!")
 
 print("✅ MoE model successfully created with proper loading configuration.")

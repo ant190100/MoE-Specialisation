@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=vlm_stage2_training
-#SBATCH -p gpu-a100-mig
+#SBATCH -p gpu-a100-short
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
