@@ -63,7 +63,10 @@ llm = AutoModelForCausalLM.from_pretrained(
     trust_remote_code=True, # Trust your custom model files
     local_files_only=True
 ).to(DEVICE)
-print("✅ Custom MoE model loaded and quantized.")
+print("✅ Custom MoE model loaded.")
+
+# Enable gradient checkpointing to save memory
+llm.gradient_checkpointing_enable()
 
 # --- Load Trained Stage 1 Vision Connector ---
 vision_connector = VisionLanguageConnector().to(DEVICE)
