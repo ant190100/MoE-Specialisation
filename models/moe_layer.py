@@ -14,9 +14,13 @@ class MoELayer(nn.Module):
     def forward(self, hidden_states: torch.Tensor):
         routing_mask = self.routing_mask
         batch_size, seq_len, hidden_dim = hidden_states.shape
-        
-        # Initialize output
-        final_output = torch.zeros_like(hidden_states)
+
+        # Initialize output with explicit dtype matching
+        final_output = torch.zeros(
+            batch_size, seq_len, hidden_dim, 
+            dtype=hidden_states.dtype, 
+            device=hidden_states.device
+        )
 
         # Route to vision expert (0) - ONLY process vision tokens
         vision_mask = (routing_mask == 0)
@@ -27,7 +31,7 @@ class MoELayer(nn.Module):
             
             if vision_tokens.numel() > 0:
                 vision_output = self.experts[0](vision_tokens)
-                final_output[vision_indices] = vision_output
+                final_output[vision_indices] = vision_output.to(final_output.dtype)
 
         # Route to text expert (1) - ONLY process text tokens  
         text_mask = (routing_mask == 1)
@@ -38,6 +42,6 @@ class MoELayer(nn.Module):
             
             if text_tokens.numel() > 0:
                 text_output = self.experts[1](text_tokens)
-                final_output[text_indices] = text_output
+                final_output[text_indices] = text_output.to(final_output.dtype)
 
         return final_output
