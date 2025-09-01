@@ -8,31 +8,33 @@ class MoELayer(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.num_experts = num_experts
-        self.router = nn.Linear(d_model, num_experts)
+        # The router is not needed for this hard-coded routing logic
         self.experts = nn.ModuleList([MistralMLP(config) for _ in range(num_experts)])
 
     def forward(self, hidden_states: torch.Tensor):
-        routing_mask = self.routing_mask
+        # hidden_states shape: (batch_size, seq_len, d_model)
+        routing_mask = self.routing_mask # shape: (batch_size, seq_len)
         
-        # --- This is the standard, correct implementation ---
+        # --- This is the memory-optimized implementation ---
+        
+        # Create an empty tensor to store the final output
+        final_output = torch.zeros_like(hidden_states)
 
-        # 1. Get the output from each expert for all tokens.
-        #    This is required for gradient checkpointing to work correctly.
-        vision_output = self.experts[0](hidden_states)
-        text_output = self.experts[1](hidden_states)
+        # Find the indices for vision tokens (mask == 0) and text tokens (mask == 1)
+        vision_indices = torch.where(routing_mask == 0)
+        text_indices = torch.where(routing_mask == 1)
 
-        # 2. Create the routing masks (0s and 1s) and ensure they have the same dtype as the outputs.
-        vision_mask = (routing_mask == 0).unsqueeze(-1).to(vision_output.dtype)
-        text_mask = (routing_mask == 1).unsqueeze(-1).to(text_output.dtype)
+        # Route the corresponding tokens to each expert
+        # If there are any vision tokens, process them
+        if vision_indices[0].numel() > 0:
+            vision_tokens = hidden_states[vision_indices]
+            vision_output = self.experts[0](vision_tokens)
+            final_output[vision_indices] = vision_output
 
-        # 3. Multiply each expert's output by its mask.
-        #    This zeros out the tokens that don't belong to that expert.
-        #    The gradient path is maintained.
-        vision_contribution = vision_output * vision_mask
-        text_contribution = text_output * text_mask
-
-        # 4. Sum the contributions. Since masks are mutually exclusive, this is equivalent
-        #    to selecting the correct expert output for each token.
-        final_output = vision_contribution + text_contribution
+        # If there are any text tokens, process them
+        if text_indices[0].numel() > 0:
+            text_tokens = hidden_states[text_indices]
+            text_output = self.experts[1](text_tokens)
+            final_output[text_indices] = text_output
 
         return final_output
