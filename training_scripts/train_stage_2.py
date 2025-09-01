@@ -13,7 +13,8 @@ from transformers import (
     MistralForCausalLM,
     CLIPVisionModel,
     AutoConfig,
-    AutoModelForCausalLM
+    AutoModelForCausalLM,
+    BitsAndBytesConfig
 )
 from models import VisionLanguageConnector
 from data import COCO_Loader
@@ -57,12 +58,24 @@ tokenizer.pad_token = tokenizer.eos_token
 # This path should point to the MoE model you created with the 'create_moe_model.py' script
 moe_model_path = "/data/gpfs/projects/COMP90055/aticinovic/models/Mistral-7B-MoE"
 
+# This will quantize the model, but skip the expert layers we want to train.
+quantization_config = BitsAndBytesConfig(
+    load_in_8bit=True,
+    # Add the names of the modules to NOT quantize.
+    # In Mistral, the MLP layers are named gate_proj, up_proj, down_proj.
+    # By skipping them, we keep our experts in float16/32 and trainable.
+    llm_int8_skip_modules=["gate_proj", "up_proj", "down_proj"],
+)
+
+
 print(f"Loading custom MoE model from {moe_model_path}...")
 llm = AutoModelForCausalLM.from_pretrained(
     moe_model_path,
     trust_remote_code=True, # Trust your custom model files
-    local_files_only=True
-).to(DEVICE)
+    local_files_only=True, 
+    quantization_config=quantization_config,
+    device_map="auto"   
+)
 print("✅ Custom MoE model loaded.")
 
 # Enable gradient checkpointing to save memory
@@ -118,11 +131,16 @@ print("Preparing model for Stage 2 training...")
 for param in vision_encoder.parameters(): param.requires_grad = False
 for param in vision_connector.parameters(): param.requires_grad = False
 for param in llm.parameters(): param.requires_grad = False
+
+# Fix: Access experts directly from the MoE layer
 for layer in llm.model.layers:
-    for expert in layer.mlp.experts:
-        for param in expert.parameters():
-            param.requires_grad = True
-print("✅ All components frozen except MoE experts.")
+    if hasattr(layer.mlp, 'experts'):  # Check if this is actually a MoE layer
+        for expert in layer.mlp.experts:
+            for param in expert.parameters():
+                param.requires_grad = True
+        print(f"✅ Unfroze {len(layer.mlp.experts)} experts in layer")
+    else:
+        print(f"⚠️  Layer {layer} doesn't have MoE structure")
 
 # --- Optimizer and Loss Setup ---
 trainable_params = [p for p in llm.parameters() if p.requires_grad]
@@ -151,6 +169,9 @@ for epoch in range(NUM_EPOCHS):
                 visual_soft_tokens = vision_connector(patch_embeddings)
                 text_embeddings = llm.model.embed_tokens(input_ids)
             combined_embeddings = torch.cat([visual_soft_tokens, text_embeddings], dim=1)
+
+            combined_embeddings.requires_grad_(True)
+
             routing_mask = torch.cat([
                 torch.zeros(visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE),
                 torch.ones(text_embeddings.shape[:2], dtype=torch.long, device=DEVICE)
@@ -197,6 +218,9 @@ for epoch in range(NUM_EPOCHS):
                 visual_soft_tokens = vision_connector(patch_embeddings)
                 text_embeddings = llm.model.embed_tokens(input_ids)
                 combined_embeddings = torch.cat([visual_soft_tokens, text_embeddings], dim=1)
+
+                combined_embeddings.requires_grad_(True)
+
                 routing_mask = torch.cat([
                     torch.zeros(visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE),
                     torch.ones(text_embeddings.shape[:2], dtype=torch.long, device=DEVICE)

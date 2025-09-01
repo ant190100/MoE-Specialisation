@@ -13,35 +13,26 @@ class MoELayer(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor):
         routing_mask = self.routing_mask
-        batch_size, seq_len, hidden_dim = hidden_states.shape
+        
+        # --- This is the standard, correct implementation ---
 
-        # Initialize output with explicit dtype matching
-        final_output = torch.zeros(
-            batch_size, seq_len, hidden_dim, 
-            dtype=hidden_states.dtype, 
-            device=hidden_states.device
-        )
+        # 1. Get the output from each expert for all tokens.
+        #    This is required for gradient checkpointing to work correctly.
+        vision_output = self.experts[0](hidden_states)
+        text_output = self.experts[1](hidden_states)
 
-        # Route to vision expert (0) - ONLY process vision tokens
-        vision_mask = (routing_mask == 0)
-        if vision_mask.any():
-            # Extract ONLY the vision tokens (memory efficient)
-            vision_indices = vision_mask.nonzero(as_tuple=True)
-            vision_tokens = hidden_states[vision_indices]  # Only vision tokens
-            
-            if vision_tokens.numel() > 0:
-                vision_output = self.experts[0](vision_tokens)
-                final_output[vision_indices] = vision_output.to(final_output.dtype)
+        # 2. Create the routing masks (0s and 1s) and ensure they have the same dtype as the outputs.
+        vision_mask = (routing_mask == 0).unsqueeze(-1).to(vision_output.dtype)
+        text_mask = (routing_mask == 1).unsqueeze(-1).to(text_output.dtype)
 
-        # Route to text expert (1) - ONLY process text tokens  
-        text_mask = (routing_mask == 1)
-        if text_mask.any():
-            # Extract ONLY the text tokens (memory efficient)
-            text_indices = text_mask.nonzero(as_tuple=True)
-            text_tokens = hidden_states[text_indices]  # Only text tokens
-            
-            if text_tokens.numel() > 0:
-                text_output = self.experts[1](text_tokens)
-                final_output[text_indices] = text_output.to(final_output.dtype)
+        # 3. Multiply each expert's output by its mask.
+        #    This zeros out the tokens that don't belong to that expert.
+        #    The gradient path is maintained.
+        vision_contribution = vision_output * vision_mask
+        text_contribution = text_output * text_mask
+
+        # 4. Sum the contributions. Since masks are mutually exclusive, this is equivalent
+        #    to selecting the correct expert output for each token.
+        final_output = vision_contribution + text_contribution
 
         return final_output
