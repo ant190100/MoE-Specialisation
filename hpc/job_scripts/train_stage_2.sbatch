@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=vlm_stage2_training
 #SBATCH -p gpu-a100-short
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
@@ -9,6 +9,7 @@
 #SBATCH --time=00:10:00
 #SBATCH --output=../out_slurm/train_stage_2/train_stage_2_%j.out
 #SBATCH --error=../err_slurm/train_stage_2/train_stage_2_%j.err
+#SBATCH --gpus-per-task=2
 
 # Load modules
 module purge
@@ -30,6 +31,6 @@ cd $HOME/MoE-Specialisation
 export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
 echo "Starting training script..."
-python training_scripts/train_stage_2.py
+srun torchrun --nproc_per_node=2 training_scripts/train_stage_2.py
 
 echo "Job finished."
