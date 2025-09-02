@@ -20,7 +20,11 @@ from torch.distributed.fsdp import CPUOffload
 
 # Para GPU imports
 import torch.distributed as dist
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    StateDictType,
+    FullStateDictConfig,
+)
 from torch.utils.data.distributed import DistributedSampler
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from functools import partial
@@ -114,7 +118,6 @@ print(f"--- Rank {local_rank} --- Wrapping model with FSDP...")
 ignored_modules = [llm.model.embed_tokens]
 
 
-
 # --- NEW: Define the auto-wrap policy for your custom decoder layer ---
 my_auto_wrap_policy = partial(
     transformer_auto_wrap_policy,
@@ -127,7 +130,7 @@ my_auto_wrap_policy = partial(
 llm = FSDP(
     llm,
     device_id=torch.cuda.current_device(),
-    auto_wrap_policy=my_auto_wrap_policy, 
+    auto_wrap_policy=my_auto_wrap_policy,
     cpu_offload=CPUOffload(offload_params=True),
     mixed_precision=torch.distributed.fsdp.MixedPrecision(
         param_dtype=torch.bfloat16,
@@ -168,20 +171,46 @@ for param in vision_connector.parameters():
 # ====================================================================================
 if local_rank == 0:
     print("Creating datasets and dataloaders...")
-train_dataset = COCO_Loader(image_dir=paths["image_dir"], annotations_file=paths["annotations_file"], clip_processor=clip_processor, tokenizer=tokenizer, subset_fraction=train_params["subset_fraction"], split="train")
-val_dataset = COCO_Loader(image_dir=paths["image_dir"], annotations_file=paths["annotations_file"], clip_processor=clip_processor, tokenizer=tokenizer, subset_fraction=train_params["subset_fraction"], split="val")
+train_dataset = COCO_Loader(
+    image_dir=paths["image_dir"],
+    annotations_file=paths["annotations_file"],
+    clip_processor=clip_processor,
+    tokenizer=tokenizer,
+    subset_fraction=train_params["subset_fraction"],
+    split="train",
+)
+val_dataset = COCO_Loader(
+    image_dir=paths["image_dir"],
+    annotations_file=paths["annotations_file"],
+    clip_processor=clip_processor,
+    tokenizer=tokenizer,
+    subset_fraction=train_params["subset_fraction"],
+    split="val",
+)
 
 train_sampler = DistributedSampler(train_dataset)
 val_sampler = DistributedSampler(val_dataset, shuffle=False)
 
-train_loader = DataLoader(train_dataset, batch_size=train_params["batch_size"], sampler=train_sampler, num_workers=loader_params["num_workers"])
-val_loader = DataLoader(val_dataset, batch_size=train_params["batch_size"], sampler=val_sampler, num_workers=loader_params["num_workers"])
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=train_params["batch_size"],
+    sampler=train_sampler,
+    num_workers=loader_params["num_workers"],
+)
+val_loader = DataLoader(
+    val_dataset,
+    batch_size=train_params["batch_size"],
+    sampler=val_sampler,
+    num_workers=loader_params["num_workers"],
+)
 
 # --- NEW: Add Gradient Accumulation Steps from config ---
 accumulation_steps = train_params.get("gradient_accumulation_steps", 1)
 if local_rank == 0:
     print(f"Using gradient accumulation with {accumulation_steps} steps.")
-    print(f"Effective batch size: {train_params['batch_size'] * accumulation_steps * dist.get_world_size()}")
+    print(
+        f"Effective batch size: {train_params['batch_size'] * accumulation_steps * dist.get_world_size()}"
+    )
 
 
 optimizer = optim.AdamW(llm.parameters(), lr=train_params["learning_rate"])
@@ -189,7 +218,9 @@ scaler = GradScaler()
 loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 
 if local_rank == 0:
-    print(f"Optimizing {sum(p.numel() for p in llm.parameters() if p.requires_grad)} trainable parameters.")
+    print(
+        f"Optimizing {sum(p.numel() for p in llm.parameters() if p.requires_grad)} trainable parameters."
+    )
 
 # ====================================================================================
 # 7. TRAINING LOOP
@@ -200,26 +231,51 @@ for epoch in range(NUM_EPOCHS):
     train_sampler.set_epoch(epoch)
     llm.train()
     total_train_loss = 0
-    optimizer.zero_grad() # Zero gradients at the start of each epoch
+    optimizer.zero_grad()  # Zero gradients at the start of each epoch
     for i, (images, input_ids, attention_mask) in enumerate(train_loader):
-        images, input_ids, attention_mask = (images.to(DEVICE), input_ids.to(DEVICE), attention_mask.to(DEVICE))
-        
-        with autocast(device_type='cuda', dtype=torch.bfloat16):
+        images, input_ids, attention_mask = (
+            images.to(DEVICE),
+            input_ids.to(DEVICE),
+            attention_mask.to(DEVICE),
+        )
+
+        with autocast(device_type="cuda", dtype=torch.bfloat16):
             with torch.no_grad():
                 patch_embeddings = vision_encoder(images).last_hidden_state
                 visual_soft_tokens = vision_connector(patch_embeddings)
-            
+
             text_embeddings = llm.model.embed_tokens(input_ids)
-            combined_embeddings = torch.cat([visual_soft_tokens, text_embeddings], dim=1)
+            combined_embeddings = torch.cat(
+                [visual_soft_tokens, text_embeddings], dim=1
+            )
 
             combined_embeddings.requires_grad_(True)
-            
-            routing_mask = torch.cat([torch.zeros(visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE), torch.ones(text_embeddings.shape[:2], dtype=torch.long, device=DEVICE)], dim=1)
+
+            routing_mask = torch.cat(
+                [
+                    torch.zeros(
+                        visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE
+                    ),
+                    torch.ones(
+                        text_embeddings.shape[:2], dtype=torch.long, device=DEVICE
+                    ),
+                ],
+                dim=1,
+            )
             for layer in llm.model.layers:
                 layer.mlp.routing_mask = routing_mask
-            
-            combined_attention_mask = torch.cat([torch.ones(visual_soft_tokens.shape[:2], device=DEVICE), attention_mask], dim=1)
-            outputs = llm(inputs_embeds=combined_embeddings, attention_mask=combined_attention_mask)
+
+            combined_attention_mask = torch.cat(
+                [
+                    torch.ones(visual_soft_tokens.shape[:2], device=DEVICE),
+                    attention_mask,
+                ],
+                dim=1,
+            )
+            outputs = llm(
+                inputs_embeds=combined_embeddings,
+                attention_mask=combined_attention_mask,
+            )
             logits = outputs.logits
 
             num_visual_tokens = visual_soft_tokens.shape[1]
@@ -227,14 +283,16 @@ for epoch in range(NUM_EPOCHS):
             text_labels = input_ids[..., 1:].contiguous()
 
             if text_logits.shape[1] == text_labels.shape[1]:
-                loss = loss_fn(text_logits.view(-1, llm.config.vocab_size), text_labels.view(-1))
+                loss = loss_fn(
+                    text_logits.view(-1, llm.config.vocab_size), text_labels.view(-1)
+                )
                 # --- MODIFIED: Scale loss for accumulation ---
                 loss = loss / accumulation_steps
             else:
                 loss = torch.tensor(0.0, device=DEVICE, requires_grad=True)
 
         scaler.scale(loss).backward()
-        
+
         # --- MODIFIED: Rescale for logging before optimizer step ---
         if loss.item() > 0:
             total_train_loss += loss.item() * accumulation_steps
@@ -244,7 +302,7 @@ for epoch in range(NUM_EPOCHS):
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
-    
+
     avg_train_loss = total_train_loss / len(train_loader)
     if local_rank == 0:
         print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] - Training Loss: {avg_train_loss:.4f}")
@@ -254,20 +312,47 @@ for epoch in range(NUM_EPOCHS):
     total_val_loss = 0
     with torch.no_grad():
         for i, (images, input_ids, attention_mask) in enumerate(val_loader):
-            images, input_ids, attention_mask = (images.to(DEVICE), input_ids.to(DEVICE), attention_mask.to(DEVICE))
-            with autocast(device_type='cuda', dtype=torch.bfloat16):
+            images, input_ids, attention_mask = (
+                images.to(DEVICE),
+                input_ids.to(DEVICE),
+                attention_mask.to(DEVICE),
+            )
+            with autocast(device_type="cuda", dtype=torch.bfloat16):
                 patch_embeddings = vision_encoder(images).last_hidden_state
                 visual_soft_tokens = vision_connector(patch_embeddings)
-                
-                text_embeddings = llm.model.embed_tokens(input_ids)
-                combined_embeddings = torch.cat([visual_soft_tokens, text_embeddings], dim=1)
 
-                routing_mask = torch.cat([torch.zeros(visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE), torch.ones(text_embeddings.shape[:2], dtype=torch.long, device=DEVICE)], dim=1)
+                text_embeddings = llm.model.embed_tokens(input_ids)
+                combined_embeddings = torch.cat(
+                    [visual_soft_tokens, text_embeddings], dim=1
+                )
+
+                routing_mask = torch.cat(
+                    [
+                        torch.zeros(
+                            visual_soft_tokens.shape[:2],
+                            dtype=torch.long,
+                            device=DEVICE,
+                        ),
+                        torch.ones(
+                            text_embeddings.shape[:2], dtype=torch.long, device=DEVICE
+                        ),
+                    ],
+                    dim=1,
+                )
                 for layer in llm.model.layers:
                     layer.mlp.routing_mask = routing_mask
-                
-                combined_attention_mask = torch.cat([torch.ones(visual_soft_tokens.shape[:2], device=DEVICE), attention_mask], dim=1)
-                outputs = llm(inputs_embeds=combined_embeddings, attention_mask=combined_attention_mask)
+
+                combined_attention_mask = torch.cat(
+                    [
+                        torch.ones(visual_soft_tokens.shape[:2], device=DEVICE),
+                        attention_mask,
+                    ],
+                    dim=1,
+                )
+                outputs = llm(
+                    inputs_embeds=combined_embeddings,
+                    attention_mask=combined_attention_mask,
+                )
                 logits = outputs.logits
 
                 num_visual_tokens = visual_soft_tokens.shape[1]
@@ -275,17 +360,41 @@ for epoch in range(NUM_EPOCHS):
                 text_labels = input_ids[..., 1:].contiguous()
 
                 if text_logits.shape[1] == text_labels.shape[1]:
-                    loss = loss_fn(text_logits.view(-1, llm.config.vocab_size), text_labels.view(-1))
+                    loss = loss_fn(
+                        text_logits.view(-1, llm.config.vocab_size),
+                        text_labels.view(-1),
+                    )
                 else:
                     loss = torch.tensor(0.0, device=DEVICE)
 
             total_val_loss += loss.item()
-    
+
     avg_val_loss = total_val_loss / len(val_loader)
     if local_rank == 0:
         print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] - Validation Loss: {avg_val_loss:.4f}")
 
-if local_rank == 0:
-    print("✅ Training complete.")
+    # --- NEW: Save checkpoint at the end of each epoch ---
+    if local_rank == 0:
+        print(f"Saving model checkpoint at the end of epoch {epoch+1}...")
 
+    # Configure the policy for saving the full state dict
+    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+    with FSDP.state_dict_type(llm, StateDictType.FULL_STATE_DICT, save_policy):
+        cpu_state_dict = llm.state_dict()
+
+    if local_rank == 0:
+
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        file_path = os.path.join(OUTPUT_DIR, f"llm_stage2_epoch_{epoch+1}.pth")
+
+        # Save the model state dict
+        torch.save(cpu_state_dict, file_path)
+        print(f"Model checkpoint saved to {file_path}")
+
+    dist.barrier()
+
+
+dist.barrier()  # Wait for all processes to finish before exiting
 dist.destroy_process_group()
+
+print("Job finished.")
