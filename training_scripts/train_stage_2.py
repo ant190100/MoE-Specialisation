@@ -117,15 +117,12 @@ for layer in llm.model.layers:
 # ====================================================================================
 print(f"--- Rank {local_rank} --- Wrapping model with FSDP...")
 
-# The embedding layer is `llm.model.embed_tokens`.
-ignored_modules = [llm.model.embed_tokens]
-
 
 # --- NEW: Define the auto-wrap policy for your custom decoder layer ---
 my_auto_wrap_policy = partial(
     transformer_auto_wrap_policy,
     transformer_layer_cls={
-        MistralMLP,
+        MistralMoEDecoderLayer,
     },
 )
 
@@ -134,14 +131,13 @@ llm = FSDP(
     llm,
     device_id=torch.cuda.current_device(),
     auto_wrap_policy=my_auto_wrap_policy,
-    cpu_offload=CPUOffload(offload_params=True),
+    cpu_offload=CPUOffload(offload_params=False),
     mixed_precision=torch.distributed.fsdp.MixedPrecision(
         param_dtype=torch.bfloat16,
         reduce_dtype=torch.bfloat16,
         buffer_dtype=torch.bfloat16,
     ),
     use_orig_params=True,
-    ignored_modules=ignored_modules,
 )
 print(f"--- Rank {local_rank} --- ✅ Model wrapped with FSDP.")
 
@@ -189,11 +185,6 @@ if latest_epoch > 0:
 
     if local_rank == 0:
         print("✅ Resumed model weights loaded.")
-
-# Manually move the ignored module to the correct GPU device.
-if local_rank == 0:
-    print(f"Manually moving ignored modules to device {DEVICE}")
-llm.model.embed_tokens.to(DEVICE)
 
 llm.gradient_checkpointing_enable()
 
