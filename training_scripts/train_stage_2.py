@@ -392,14 +392,15 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
                 combined_attention_mask = torch.cat(
                     [
                         torch.ones(visual_soft_tokens.shape[:2], device=DEVICE),
-                        attention_mask,
-                        routing_mask=routing_mask,
+                        attention_mask
                     ],
                     dim=1,
                 )
+
                 outputs = llm(
                     inputs_embeds=combined_embeddings,
                     attention_mask=combined_attention_mask,
+                    routing_mask=routing_mask,
                 )
                 logits = outputs.logits
 
