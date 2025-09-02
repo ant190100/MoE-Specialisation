@@ -16,12 +16,16 @@ from transformers import (
 from models import VisionLanguageConnector
 from data import COCO_Loader
 from torch.amp import GradScaler, autocast
+from torch.distributed.fsdp import CPUOffload
 
 # Para GPU imports
 import torch.distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.utils.data.distributed import DistributedSampler
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from functools import partial
+
+from transformers.models.mistral.modeling_mistral import MistralMLP
 
 # Import your custom MoE classes
 from models.custom_mistral import (
@@ -29,6 +33,8 @@ from models.custom_mistral import (
     MistralMoEForCausalLM,
     MistralMoEDecoderLayer,
 )
+
+from models.moe_layer import MoELayer
 
 # --- 1. Register Your Custom Architecture ---
 AutoConfig.register("mistral_moe", MistralMoEConfig)
@@ -107,9 +113,22 @@ print(f"--- Rank {local_rank} --- Wrapping model with FSDP...")
 # The embedding layer is `llm.model.embed_tokens`.
 ignored_modules = [llm.model.embed_tokens]
 
+
+
+# --- NEW: Define the auto-wrap policy for your custom decoder layer ---
+my_auto_wrap_policy = partial(
+    transformer_auto_wrap_policy,
+    transformer_layer_cls={
+        MistralMLP,
+    },
+)
+
+
 llm = FSDP(
     llm,
     device_id=torch.cuda.current_device(),
+    auto_wrap_policy=my_auto_wrap_policy, 
+    cpu_offload=CPUOffload(offload_params=True),
     mixed_precision=torch.distributed.fsdp.MixedPrecision(
         param_dtype=torch.bfloat16,
         reduce_dtype=torch.bfloat16,
@@ -120,8 +139,7 @@ llm = FSDP(
 )
 print(f"--- Rank {local_rank} --- ✅ Model wrapped with FSDP.")
 
-# FIX: Manually move the ignored module to the correct GPU device.
-# FSDP does not manage ignored modules, so they must be moved manually.
+# Manually move the ignored module to the correct GPU device.
 if local_rank == 0:
     print(f"Manually moving ignored modules to device {DEVICE}")
 llm.model.embed_tokens.to(DEVICE)
@@ -159,6 +177,13 @@ val_sampler = DistributedSampler(val_dataset, shuffle=False)
 train_loader = DataLoader(train_dataset, batch_size=train_params["batch_size"], sampler=train_sampler, num_workers=loader_params["num_workers"])
 val_loader = DataLoader(val_dataset, batch_size=train_params["batch_size"], sampler=val_sampler, num_workers=loader_params["num_workers"])
 
+# --- NEW: Add Gradient Accumulation Steps from config ---
+accumulation_steps = train_params.get("gradient_accumulation_steps", 1)
+if local_rank == 0:
+    print(f"Using gradient accumulation with {accumulation_steps} steps.")
+    print(f"Effective batch size: {train_params['batch_size'] * accumulation_steps * dist.get_world_size()}")
+
+
 optimizer = optim.AdamW(llm.parameters(), lr=train_params["learning_rate"])
 scaler = GradScaler()
 loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
@@ -175,18 +200,19 @@ for epoch in range(NUM_EPOCHS):
     train_sampler.set_epoch(epoch)
     llm.train()
     total_train_loss = 0
+    optimizer.zero_grad() # Zero gradients at the start of each epoch
     for i, (images, input_ids, attention_mask) in enumerate(train_loader):
         images, input_ids, attention_mask = (images.to(DEVICE), input_ids.to(DEVICE), attention_mask.to(DEVICE))
-        optimizer.zero_grad()
         
         with autocast(device_type='cuda', dtype=torch.bfloat16):
             with torch.no_grad():
                 patch_embeddings = vision_encoder(images).last_hidden_state
                 visual_soft_tokens = vision_connector(patch_embeddings)
             
-            # This call is now safe because embed_tokens is not sharded and is on the correct device
             text_embeddings = llm.model.embed_tokens(input_ids)
             combined_embeddings = torch.cat([visual_soft_tokens, text_embeddings], dim=1)
+
+            combined_embeddings.requires_grad_(True)
             
             routing_mask = torch.cat([torch.zeros(visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE), torch.ones(text_embeddings.shape[:2], dtype=torch.long, device=DEVICE)], dim=1)
             for layer in llm.model.layers:
@@ -202,13 +228,22 @@ for epoch in range(NUM_EPOCHS):
 
             if text_logits.shape[1] == text_labels.shape[1]:
                 loss = loss_fn(text_logits.view(-1, llm.config.vocab_size), text_labels.view(-1))
+                # --- MODIFIED: Scale loss for accumulation ---
+                loss = loss / accumulation_steps
             else:
                 loss = torch.tensor(0.0, device=DEVICE, requires_grad=True)
 
         scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
-        total_train_loss += loss.item()
+        
+        # --- MODIFIED: Rescale for logging before optimizer step ---
+        if loss.item() > 0:
+            total_train_loss += loss.item() * accumulation_steps
+
+        # --- MODIFIED: Step optimizer only after accumulation_steps ---
+        if (i + 1) % accumulation_steps == 0 or (i + 1) == len(train_loader):
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
     
     avg_train_loss = total_train_loss / len(train_loader)
     if local_rank == 0:

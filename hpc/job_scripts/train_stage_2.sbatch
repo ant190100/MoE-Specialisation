@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=vlm_stage2_training
-#SBATCH -p gpu-a100-short
+#SBATCH -p gpu-l40s
 #SBATCH --gres=gpu:2
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=96G
+#SBATCH --mem=180G
 #SBATCH --time=00:10:00
 #SBATCH --output=../out_slurm/train_stage_2/train_stage_2_%j.out
 #SBATCH --error=../err_slurm/train_stage_2/train_stage_2_%j.err
@@ -31,6 +31,9 @@ cd $HOME/MoE-Specialisation
 export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
 echo "Starting training script..."
+export NCCL_DEBUG=INFO # Optional: for debugging network communication
+export PYTHONFAULTHANDLER=1 # Optional: for better tracebacks on segfaults
+
 srun torchrun --nproc_per_node=2 training_scripts/train_stage_2.py
 
 echo "Job finished."
