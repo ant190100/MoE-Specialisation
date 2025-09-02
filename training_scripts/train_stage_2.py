@@ -3,6 +3,7 @@ import torch
 import os
 import gc
 import sys
+import re
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -55,6 +56,7 @@ train_params = config["training_stage2"]
 loader_params = config["dataloader"]
 NUM_EPOCHS = train_params["num_epochs"]
 OUTPUT_DIR = paths["output_dir"]
+STAGE2_CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, "stage2_checkpoints")
 
 # --- Initialize the distributed environment ---
 dist.init_process_group("nccl")
@@ -142,6 +144,51 @@ llm = FSDP(
 )
 print(f"--- Rank {local_rank} --- ✅ Model wrapped with FSDP.")
 
+# --- MODIFIED: More robust checkpoint loading ---
+latest_epoch = 0
+# Let only rank 0 scan the filesystem to find the latest checkpoint
+if local_rank == 0:
+    if os.path.exists(STAGE2_CHECKPOINT_DIR):
+        epoch_numbers = []
+        # Use regex to find all checkpoint files and extract their epoch number
+        for filename in os.listdir(STAGE2_CHECKPOINT_DIR):
+            match = re.match(r"llm_stage2_epoch_(\d+)\.pth", filename)
+            if match:
+                epoch_numbers.append(int(match.group(1)))
+        
+        if epoch_numbers:
+            latest_epoch = max(epoch_numbers)
+
+# Broadcast the found latest_epoch from rank 0 to all other ranks
+# This ensures all processes agree on which epoch to start from.
+epoch_tensor = torch.tensor([latest_epoch], dtype=torch.int).to(DEVICE)
+dist.broadcast(epoch_tensor, src=0)
+latest_epoch = epoch_tensor.item()
+
+# Handle case where training is already complete
+if latest_epoch >= NUM_EPOCHS:
+    if local_rank == 0:
+        print(f"Latest checkpoint (epoch {latest_epoch}) is already >= NUM_EPOCHS ({NUM_EPOCHS}). Nothing to do.")
+    dist.destroy_process_group()
+    sys.exit(0) # Exit gracefully
+
+# If a checkpoint is found, load it
+if latest_epoch > 0:
+    checkpoint_path = os.path.join(STAGE2_CHECKPOINT_DIR, f"llm_stage2_epoch_{latest_epoch}.pth")
+    if local_rank == 0:
+        print(f"💾 Found existing checkpoint. Resuming training from epoch {latest_epoch+1} using {checkpoint_path}")
+
+    load_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=False)
+    with FSDP.state_dict_type(llm, StateDictType.FULL_STATE_DICT, load_policy):
+        state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        llm.load_state_dict(state_dict)
+    
+    del state_dict
+    gc.collect()
+
+    if local_rank == 0:
+        print("✅ Resumed model weights loaded.")
+
 # Manually move the ignored module to the correct GPU device.
 if local_rank == 0:
     print(f"Manually moving ignored modules to device {DEVICE}")
@@ -227,7 +274,7 @@ if local_rank == 0:
 # ====================================================================================
 if local_rank == 0:
     print(f"🚀 Starting Stage 2 training for {NUM_EPOCHS} epochs...")
-for epoch in range(NUM_EPOCHS):
+for epoch in range(latest_epoch, NUM_EPOCHS):
     train_sampler.set_epoch(epoch)
     llm.train()
     total_train_loss = 0
@@ -302,6 +349,11 @@ for epoch in range(NUM_EPOCHS):
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
+
+        # --- Add periodic print statement for progress ---
+        if local_rank == 0 and (i + 1) % 100 == 0:
+            # This will print an update roughly every 100 batches
+            print(f"  Epoch {epoch+1}, Batch [{i+1}/{len(train_loader)}]")
 
     avg_train_loss = total_train_loss / len(train_loader)
     if local_rank == 0:
@@ -384,8 +436,8 @@ for epoch in range(NUM_EPOCHS):
 
     if local_rank == 0:
 
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        file_path = os.path.join(OUTPUT_DIR, f"llm_stage2_epoch_{epoch+1}.pth")
+        os.makedirs(STAGE2_CHECKPOINT_DIR, exist_ok=True)
+        file_path = os.path.join(STAGE2_CHECKPOINT_DIR, f"llm_stage2_epoch_{epoch+1}.pth")
 
         # Save the model state dict
         torch.save(cpu_state_dict, file_path)
