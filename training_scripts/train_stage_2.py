@@ -1,3 +1,4 @@
+import time
 import yaml
 import torch
 import os
@@ -274,6 +275,7 @@ if local_rank == 0:
 # ====================================================================================
 if local_rank == 0:
     print(f"🚀 Starting Stage 2 training for {NUM_EPOCHS} epochs...")
+start_time = time.time()
 for epoch in range(latest_epoch, NUM_EPOCHS):
     train_sampler.set_epoch(epoch)
     llm.train()
@@ -445,6 +447,14 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
 
     dist.barrier()
 
+# --- 3. Calculate and print the total training time ---
+if local_rank == 0:
+    end_time = time.time()
+    duration_seconds = end_time - start_time
+    hours = int(duration_seconds // 3600)
+    minutes = int((duration_seconds % 3600) // 60)
+    seconds = int(duration_seconds % 60)
+    print(f"--- Total Training Time: {hours}h {minutes}m {seconds}s ---")
 
 dist.barrier()  # Wait for all processes to finish before exiting
 dist.destroy_process_group()
