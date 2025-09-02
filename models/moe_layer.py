@@ -11,11 +11,13 @@ class MoELayer(nn.Module):
         # The router is not needed for this hard-coded routing logic
         self.experts = nn.ModuleList([MistralMLP(config) for _ in range(num_experts)])
 
-    def forward(self, hidden_states: torch.Tensor):
+    def forward(self, hidden_states: torch.Tensor, routing_mask: torch.Tensor = None):
         # hidden_states shape: (batch_size, seq_len, d_model)
-        routing_mask = self.routing_mask # shape: (batch_size, seq_len)
-        
-        # --- This is the memory-optimized implementation ---
+        if routing_mask is None:
+            # Default behavior: if no mask is provided, assume all tokens are text tokens (expert 1)
+            routing_mask = torch.ones(hidden_states.shape[:2], dtype=torch.long, device=hidden_states.device)        
+       
+ # --- This is the memory-optimized implementation ---
         
         # Create an empty tensor to store the final output
         final_output = torch.zeros_like(hidden_states)

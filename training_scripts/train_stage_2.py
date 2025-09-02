@@ -284,7 +284,9 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
                 patch_embeddings = vision_encoder(images).last_hidden_state
                 visual_soft_tokens = vision_connector(patch_embeddings)
 
-            text_embeddings = llm.model.embed_tokens(input_ids)
+            text_outputs = llm(input_ids=input_ids, output_hidden_states=True)
+            text_embeddings = text_outputs.hidden_states[0]
+
             combined_embeddings = torch.cat(
                 [visual_soft_tokens, text_embeddings], dim=1
             )
@@ -302,8 +304,6 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
                 ],
                 dim=1,
             )
-            for layer in llm.model.layers:
-                layer.mlp.routing_mask = routing_mask
 
             combined_attention_mask = torch.cat(
                 [
@@ -312,9 +312,11 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
                 ],
                 dim=1,
             )
+
             outputs = llm(
                 inputs_embeds=combined_embeddings,
                 attention_mask=combined_attention_mask,
+                routing_mask=routing_mask,
             )
             logits = outputs.logits
 
@@ -365,8 +367,10 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
             with autocast(device_type="cuda", dtype=torch.bfloat16):
                 patch_embeddings = vision_encoder(images).last_hidden_state
                 visual_soft_tokens = vision_connector(patch_embeddings)
+ 
+                text_outputs = llm(input_ids=input_ids, output_hidden_states=True)
+                text_embeddings = text_outputs.hidden_states[0]
 
-                text_embeddings = llm.model.embed_tokens(input_ids)
                 combined_embeddings = torch.cat(
                     [visual_soft_tokens, text_embeddings], dim=1
                 )
@@ -384,13 +388,12 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
                     ],
                     dim=1,
                 )
-                for layer in llm.model.layers:
-                    layer.mlp.routing_mask = routing_mask
 
                 combined_attention_mask = torch.cat(
                     [
                         torch.ones(visual_soft_tokens.shape[:2], device=DEVICE),
                         attention_mask,
+                        routing_mask=routing_mask,
                     ],
                     dim=1,
                 )
@@ -417,24 +420,6 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
     avg_val_loss = total_val_loss / len(val_loader)
     if local_rank == 0:
         print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] - Validation Loss: {avg_val_loss:.4f}")
-
-    # --- NEW: Save checkpoint at the end of each epoch ---
-    if local_rank == 0:
-        print(f"Saving model checkpoint at the end of epoch {epoch+1}...")
-
-    # Configure the policy for saving the full state dict
-    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    with FSDP.state_dict_type(llm, StateDictType.FULL_STATE_DICT, save_policy):
-        cpu_state_dict = llm.state_dict()
-
-    if local_rank == 0:
-
-        os.makedirs(STAGE2_CHECKPOINT_DIR, exist_ok=True)
-        file_path = os.path.join(STAGE2_CHECKPOINT_DIR, f"llm_stage2_epoch_{epoch+1}.pth")
-
-        # Save the model state dict
-        torch.save(cpu_state_dict, file_path)
-        print(f"Model checkpoint saved to {file_path}")
 
     dist.barrier()
 
