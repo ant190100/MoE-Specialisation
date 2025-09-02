@@ -3,6 +3,7 @@ import json
 from PIL import Image
 from torch.utils.data import Dataset
 import random
+from pycocotools.coco import COCO
 
 class COCO_Loader(Dataset):
     def __init__(
@@ -16,26 +17,30 @@ class COCO_Loader(Dataset):
         val_split_fraction=0.1,
     ):
         self.image_dir = image_dir
+        self.coco = COCO(annotations_file)
         self.clip_processor = clip_processor
         self.tokenizer = tokenizer
 
-        with open(annotations_file, "r") as f:
-            self.annotations = json.load(f)["annotations"]
+        # --- MODIFIED: Subset based on unique image IDs ---
+        all_img_ids = list(sorted(self.coco.imgs.keys()))
+        random.shuffle(all_img_ids)
 
-        # Shuffle and subset the data
-        random.seed(42) # Add seed for reproducibility
-        random.shuffle(self.annotations)
-        subset_size = int(len(self.annotations) * subset_fraction)
-        self.annotations = self.annotations[:subset_size]
+        # 1. Take a fraction of the unique image IDs
+        subset_size = int(len(all_img_ids) * subset_fraction)
+        subset_img_ids = all_img_ids[:subset_size]
 
-        # Split the data into training and validation sets
-        split_index = int(len(self.annotations) * (1 - val_split_fraction))
+        # 2. Split the subset of image IDs into train/val
+        split_index = int(len(subset_img_ids) * (1 - val_split_fraction))
         if split == "train":
-            self.annotations = self.annotations[:split_index]
-            print(f"Using {len(self.annotations)} images for training.")
+            final_img_ids = subset_img_ids[:split_index]
+            print(f"Using {len(final_img_ids)} unique images for training.")
         elif split == "val":
-            self.annotations = self.annotations[split_index:]
-            print(f"Using {len(self.annotations)} images for validation.")
+            final_img_ids = subset_img_ids[split_index:]
+            print(f"Using {len(final_img_ids)} unique images for validation.")
+        
+        # 3. Load annotations ONLY for the final set of image IDs
+        ann_ids = self.coco.getAnnIds(imgIds=final_img_ids)
+        self.annotations = self.coco.loadAnns(ann_ids)
 
     def __len__(self):
         return len(self.annotations)
