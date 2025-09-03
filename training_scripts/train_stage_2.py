@@ -279,47 +279,50 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
             attention_mask.to(DEVICE),
         )
 
+
         with autocast(device_type="cuda", dtype=torch.bfloat16):
+            # 1. Get visual tokens (this part is correct)
             with torch.no_grad():
                 patch_embeddings = vision_encoder(images).last_hidden_state
                 visual_soft_tokens = vision_connector(patch_embeddings)
 
-            text_outputs = llm(input_ids=input_ids, output_hidden_states=True)
-            text_embeddings = text_outputs.hidden_states[0]
+            # --- DEFINITIVE FIX: Manually embed text and combine for a SINGLE forward pass ---
 
+            # 2. Manually get text embeddings from the model's embedding layer.
+            # .module gives us access to the underlying model inside the FSDP wrapper.
+            text_embeddings = llm.module.model.embed_tokens(input_ids)
+
+            # 3. Concatenate visual and text embeddings.
             combined_embeddings = torch.cat(
                 [visual_soft_tokens, text_embeddings], dim=1
             )
 
-            combined_embeddings.requires_grad_(True)
-
-            routing_mask = torch.cat(
-                [
-                    torch.zeros(
-                        visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE
-                    ),
-                    torch.ones(
-                        text_embeddings.shape[:2], dtype=torch.long, device=DEVICE
-                    ),
-                ],
-                dim=1,
+            # 4. Create the combined attention mask.
+            visual_attention_mask = torch.ones(
+                visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE
             )
-
             combined_attention_mask = torch.cat(
-                [
-                    torch.ones(visual_soft_tokens.shape[:2], device=DEVICE),
-                    attention_mask,
-                ],
-                dim=1,
+                [visual_attention_mask, attention_mask], dim=1
             )
 
+            # 5. Create the combined routing mask.
+            visual_routing_mask = torch.zeros(
+                visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE
+            )
+            text_routing_mask = torch.ones(
+                input_ids.shape, dtype=torch.long, device=DEVICE
+            )
+            combined_routing_mask = torch.cat(
+                [visual_routing_mask, text_routing_mask], dim=1
+            )
+
+            # 6. Call the model ONCE with the combined embeddings.
             outputs = llm(
                 inputs_embeds=combined_embeddings,
                 attention_mask=combined_attention_mask,
-                routing_mask=routing_mask,
+                routing_mask=combined_routing_mask,
             )
             logits = outputs.logits
-
             num_visual_tokens = visual_soft_tokens.shape[1]
             text_logits = logits[..., num_visual_tokens:-1, :].contiguous()
             text_labels = input_ids[..., 1:].contiguous()
@@ -364,43 +367,39 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
                 input_ids.to(DEVICE),
                 attention_mask.to(DEVICE),
             )
+
             with autocast(device_type="cuda", dtype=torch.bfloat16):
                 patch_embeddings = vision_encoder(images).last_hidden_state
                 visual_soft_tokens = vision_connector(patch_embeddings)
  
-                text_outputs = llm(input_ids=input_ids, output_hidden_states=True)
-                text_embeddings = text_outputs.hidden_states[0]
+                # Apply the same definitive fix to the validation loop
+                text_embeddings = llm.module.model.embed_tokens(input_ids)
 
                 combined_embeddings = torch.cat(
                     [visual_soft_tokens, text_embeddings], dim=1
                 )
 
-                routing_mask = torch.cat(
-                    [
-                        torch.zeros(
-                            visual_soft_tokens.shape[:2],
-                            dtype=torch.long,
-                            device=DEVICE,
-                        ),
-                        torch.ones(
-                            text_embeddings.shape[:2], dtype=torch.long, device=DEVICE
-                        ),
-                    ],
-                    dim=1,
+                visual_attention_mask = torch.ones(
+                    visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE
+                )
+                combined_attention_mask = torch.cat(
+                    [visual_attention_mask, attention_mask], dim=1
                 )
 
-                combined_attention_mask = torch.cat(
-                    [
-                        torch.ones(visual_soft_tokens.shape[:2], device=DEVICE),
-                        attention_mask
-                    ],
-                    dim=1,
+                visual_routing_mask = torch.zeros(
+                    visual_soft_tokens.shape[:2], dtype=torch.long, device=DEVICE
+                )
+                text_routing_mask = torch.ones(
+                    input_ids.shape, dtype=torch.long, device=DEVICE
+                )
+                combined_routing_mask = torch.cat(
+                    [visual_routing_mask, text_routing_mask], dim=1
                 )
 
                 outputs = llm(
                     inputs_embeds=combined_embeddings,
                     attention_mask=combined_attention_mask,
-                    routing_mask=routing_mask,
+                    routing_mask=combined_routing_mask,
                 )
                 logits = outputs.logits
 
