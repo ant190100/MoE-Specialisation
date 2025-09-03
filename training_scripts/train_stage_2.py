@@ -214,6 +214,12 @@ for param in vision_encoder.parameters():
 for param in vision_connector.parameters():
     param.requires_grad = False
 
+if local_rank == 0:
+    print("Compiling the model with torch.compile()...")
+llm = torch.compile(llm)
+if local_rank == 0:
+    print("✅ Model compiled.")
+
 # ====================================================================================
 # 6. DATA & OPTIMIZER
 # ====================================================================================
@@ -244,12 +250,14 @@ train_loader = DataLoader(
     batch_size=train_params["batch_size"],
     sampler=train_sampler,
     num_workers=loader_params["num_workers"],
+    pin_memory=True,
 )
 val_loader = DataLoader(
     val_dataset,
     batch_size=train_params["batch_size"],
     sampler=val_sampler,
     num_workers=loader_params["num_workers"],
+    pin_memory=True,
 )
 
 # --- NEW: Add Gradient Accumulation Steps from config ---
@@ -260,8 +268,9 @@ if local_rank == 0:
         f"Effective batch size: {train_params['batch_size'] * accumulation_steps * dist.get_world_size()}"
     )
 
+trainable_params = [p for p in llm.parameters() if p.requires_grad]
 
-optimizer = optim.AdamW(llm.parameters(), lr=train_params["learning_rate"])
+optimizer = optim.AdamW(trainable_params, lr=train_params["learning_rate"], weight_decay=train_params["weight_decay"], fused=True)
 scaler = GradScaler()
 loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 
