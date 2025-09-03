@@ -1,15 +1,15 @@
 #!/bin/bash
 #SBATCH --job-name=vlm_stage2_training
 #SBATCH -p gpu-l40s
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:4
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=180G
-#SBATCH --time=00:10:00
+#SBATCH --time=16:00:00
 #SBATCH --output=../out_slurm/train_stage_2/train_stage_2_%j.out
 #SBATCH --error=../err_slurm/train_stage_2/train_stage_2_%j.err
-#SBATCH --gpus-per-task=2
+#SBATCH --gpus-per-task=4
 
 # Load modules
 module purge

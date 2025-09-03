@@ -284,7 +284,8 @@ if local_rank == 0:
 metrics_history = {
     "epoch": [],
     "train_loss": [],
-    "val_loss": []
+    "val_loss": [],
+    "learning_rate":[]
 }
 metrics_path = os.path.join(OUTPUT_DIR, "training_metrics_stage2.json")
 
