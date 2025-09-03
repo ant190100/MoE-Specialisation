@@ -90,6 +90,7 @@ llm = AutoModelForCausalLM.from_pretrained(
     trust_remote_code=True,
     local_files_only=True,
     torch_dtype=torch.bfloat16,
+    attn_implementation="flash_attention_2",
 )
 
 if local_rank == 0:
