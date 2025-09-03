@@ -215,11 +215,11 @@ for param in vision_encoder.parameters():
 for param in vision_connector.parameters():
     param.requires_grad = False
 
-if local_rank == 0:
-    print("Compiling the model with torch.compile()...")
-llm = torch.compile(llm)
-if local_rank == 0:
-    print("✅ Model compiled.")
+#if local_rank == 0:
+#    print("Compiling the model with torch.compile()...")
+#llm = torch.compile(llm)
+#if local_rank == 0:
+#    print("✅ Model compiled.")
 
 # ====================================================================================
 # 6. DATA & OPTIMIZER
@@ -281,7 +281,25 @@ if local_rank == 0:
     )
 
 # ====================================================================================
-# 7. TRAINING LOOP
+# 7. PRE-TRAINING VERIFICATION & LOGGING SETUP
+# ====================================================================================
+# --- Save initial model state for post-training comparison ---
+if local_rank == 0 and latest_epoch == 0: # Only save on the very first run
+    print("💾 Saving initial model state for verification...")
+    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+    with FSDP.state_dict_type(llm, StateDictType.FULL_STATE_DICT, save_policy):
+        cpu_state_dict = llm.state_dict()
+    
+    initial_state_path = os.path.join(OUTPUT_DIR, "llm_initial_state.pth")
+    torch.save(cpu_state_dict, initial_state_path)
+    print(f"✅ Initial model state saved to {initial_state_path}")
+    del cpu_state_dict # Free up memory
+    gc.collect()
+
+dist.barrier() # Ensure rank 0 finishes saving before others proceed
+
+# ====================================================================================
+# 8. TRAINING LOOP
 # ====================================================================================
 if local_rank == 0:
     print(f"🚀 Starting Stage 2 training for {NUM_EPOCHS} epochs...")
