@@ -483,6 +483,13 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
         torch.save(cpu_state_dict, file_path)
         print(f"Model checkpoint saved to {file_path}")
 
+        # Remove the previous checkpoint to save space ---
+        # The checkpoint for the previous epoch is identified by the loop variable `epoch`.
+        previous_checkpoint_path = os.path.join(STAGE2_CHECKPOINT_DIR, f"llm_stage2_epoch_{epoch}.pth")
+        if os.path.exists(previous_checkpoint_path):
+            os.remove(previous_checkpoint_path)
+            print(f"Removed previous checkpoint: {previous_checkpoint_path}")
+
     dist.barrier()
 
 # --- 3. Calculate and print the total training time ---
