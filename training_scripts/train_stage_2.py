@@ -1,4 +1,5 @@
 import time
+import json
 import yaml
 import torch
 import os
@@ -279,24 +280,19 @@ if local_rank == 0:
     print(
         f"Optimizing {sum(p.numel() for p in llm.parameters() if p.requires_grad)} trainable parameters."
     )
+# --- NEW: Initialize metrics history ---
+metrics_history = {
+    "epoch": [],
+    "train_loss": [],
+    "val_loss": []
+}
+metrics_path = os.path.join(OUTPUT_DIR, "training_metrics_stage2.json")
 
-# ====================================================================================
-# 7. PRE-TRAINING VERIFICATION & LOGGING SETUP
-# ====================================================================================
-# --- Save initial model state for post-training comparison ---
-if local_rank == 0 and latest_epoch == 0: # Only save on the very first run
-    print("💾 Saving initial model state for verification...")
-    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    with FSDP.state_dict_type(llm, StateDictType.FULL_STATE_DICT, save_policy):
-        cpu_state_dict = llm.state_dict()
-    
-    initial_state_path = os.path.join(OUTPUT_DIR, "llm_initial_state.pth")
-    torch.save(cpu_state_dict, initial_state_path)
-    print(f"✅ Initial model state saved to {initial_state_path}")
-    del cpu_state_dict # Free up memory
-    gc.collect()
+# If resuming, load previous metrics
+if local_rank == 0 and latest_epoch > 0 and os.path.exists(metrics_path):
+    with open(metrics_path, "r") as f:
+        metrics_history = json.load(f)
 
-dist.barrier() # Ensure rank 0 finishes saving before others proceed
 
 # ====================================================================================
 # 8. TRAINING LOOP
@@ -455,7 +451,20 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
     if local_rank == 0:
         print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] - Validation Loss: {avg_val_loss:.4f}")
 
-    # --- NEW: Save checkpoint at the end of each epoch ---
+    # Record metrics for the epoch ---
+    if local_rank == 0:
+        current_lr = optimizer.param_groups[0]['lr']
+        metrics_history["epoch"].append(epoch + 1)
+        metrics_history["train_loss"].append(avg_train_loss)
+        metrics_history["val_loss"].append(avg_val_loss)
+        metrics_history["learning_rate"].append(current_lr)
+
+        # Save metrics to a file at the end of each epoch
+        with open(metrics_path, "w") as f:
+            json.dump(metrics_history, f, indent=4)
+        print(f"✅ Metrics saved to {metrics_path}")
+
+    # Save checkpoint at the end of each epoch ---
     if local_rank == 0:
         print(f"Saving model checkpoint at the end of epoch {epoch+1}...")
 
