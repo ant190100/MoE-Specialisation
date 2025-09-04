@@ -29,12 +29,13 @@ from torch.distributed.fsdp import (
 from torch.utils.data.distributed import DistributedSampler
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from functools import partial
+# FIX 2: Import the scheduler
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from models.custom_mistral import (
     MistralMoEConfig,
     MistralMoEForCausalLM,
     MistralMoEDecoderLayer,
 )
-from transformers.models.mistral.modeling_mistral import MistralMLP
 
 # --- 1. Register Custom Architecture ---
 AutoConfig.register("mistral_moe", MistralMoEConfig)
@@ -86,17 +87,12 @@ llm = AutoModelForCausalLM.from_pretrained(
 # ====================================================================================
 # 4. TRAINING SETUP
 # ====================================================================================
-
-# --- 4.1. Set Routing Mode ---
-# Explicitly set all MoE layers to 'soft' routing mode.
 if local_rank == 0:
     print("Setting MoE layers to 'soft' routing mode for Stage 2.5.")
 for layer in llm.model.layers:
     if hasattr(layer.mlp, "routing_mode"):
         layer.mlp.routing_mode = 'soft'
 
-# --- 4.2. Parameter Freezing ---
-# **DIFFERENCE**: Freeze everything except the router 'gate' parameters.
 if local_rank == 0:
     print("Preparing model for Stage 2.5: Freezing experts, unfreezing routers.")
 for name, param in llm.named_parameters():
@@ -108,6 +104,7 @@ for name, param in llm.named_parameters():
 # ====================================================================================
 # 5. FSDP WRAPPING & CHECKPOINTING
 # ====================================================================================
+# FIX 3: Wrap the entire decoder layer for optimal performance
 my_auto_wrap_policy = partial(transformer_auto_wrap_policy, transformer_layer_cls={MistralMLP})
 ignored_modules = [llm.model.embed_tokens]
 
@@ -124,7 +121,6 @@ llm = FSDP(
 )
 
 # --- 5.1. Load Stage 2 Checkpoint (Base weights for experts) ---
-# Find the latest completed epoch from Stage 2 to load as a base.
 latest_stage2_epoch = 0
 if local_rank == 0:
     if os.path.exists(STAGE2_CHECKPOINT_DIR):
@@ -141,57 +137,21 @@ if latest_stage2_epoch > 0:
     if local_rank == 0:
         print(f"💾 Loading Stage 2 expert weights from: {checkpoint_path}")
     
+    # FIX 1: Load the full dictionary from the Stage 2 checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    
     load_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=False)
     with FSDP.state_dict_type(llm, StateDictType.FULL_STATE_DICT, load_policy):
-        state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-        llm.load_state_dict(state_dict, strict=False) # Use strict=False as optimizer state won't match
-    del state_dict
+        # Access the model_state_dict key within the loaded dictionary
+        llm.load_state_dict(checkpoint['model_state_dict'], strict=False)
+    
+    del checkpoint
     gc.collect()
     if local_rank == 0:
         print("✅ Stage 2 expert weights loaded successfully.")
 else:
     if local_rank == 0:
         print("🚨 WARNING: No Stage 2 checkpoint found. Routers will be trained on unspecialized experts.")
-
-# --- 5.2. Resume from Stage 2.5 Checkpoint (If it exists) ---
-latest_epoch = 0
-if local_rank == 0:
-    if os.path.exists(STAGE2_5_CHECKPOINT_DIR):
-        epoch_numbers = [int(re.search(r'epoch_(\d+)', f).group(1)) for f in os.listdir(STAGE2_5_CHECKPOINT_DIR) if re.search(r'epoch_(\d+)', f)]
-        if epoch_numbers:
-            latest_epoch = max(epoch_numbers)
-
-epoch_tensor = torch.tensor([latest_epoch], dtype=torch.int).to(DEVICE)
-dist.broadcast(epoch_tensor, src=0)
-latest_epoch = epoch_tensor.item()
-
-# This loading logic is already correct and expects a full checkpoint.
-if latest_epoch > 0:
-    checkpoint_path = os.path.join(STAGE2_5_CHECKPOINT_DIR, f"llm_stage2_5_epoch_{latest_epoch}.pth")
-    if local_rank == 0:
-        print(f"💾 Resuming Stage 2.5 training from epoch {latest_epoch+1} using {checkpoint_path}")
-    
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    
-    load_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=False)
-    with FSDP.state_dict_type(llm, StateDictType.FULL_STATE_DICT, load_policy):
-        llm.load_state_dict(checkpoint['model_state_dict'])
-    
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    scaler.load_state_dict(checkpoint['scaler_state_dict'])
-    
-    del checkpoint
-    gc.collect()
-    if local_rank == 0:
-        print("✅ Stage 2.5 training state resumed successfully.")
-
-# --- 5.3. Finalize Model Setup ---
-llm.model.embed_tokens.to(DEVICE)
-llm.gradient_checkpointing_enable()
-vision_connector = VisionLanguageConnector().to(DEVICE)
-vision_connector.load_state_dict(torch.load(os.path.join(OUTPUT_DIR, "vision_connector_stage1.pth"), map_location=DEVICE))
-for param in vision_encoder.parameters(): param.requires_grad = False
-for param in vision_connector.parameters(): param.requires_grad = False
 
 # ====================================================================================
 # 6. DATA & OPTIMIZER
@@ -209,7 +169,54 @@ accumulation_steps = train_params.get("gradient_accumulation_steps", 1)
 trainable_params = [p for p in llm.parameters() if p.requires_grad]
 optimizer = optim.AdamW(trainable_params, lr=train_params["learning_rate"], weight_decay=train_params["weight_decay"], fused=True)
 scaler = GradScaler()
+
+# FIX 2: Initialize the scheduler
+total_steps = (len(train_loader) // accumulation_steps) * NUM_EPOCHS
+scheduler = CosineAnnealingLR(optimizer, T_max=total_steps)
+
 loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
+
+# --- 5.2. Resume from Stage 2.5 Checkpoint (If it exists) ---
+latest_epoch = 0
+if local_rank == 0:
+    if os.path.exists(STAGE2_5_CHECKPOINT_DIR):
+        epoch_numbers = [int(re.search(r'epoch_(\d+)', f).group(1)) for f in os.listdir(STAGE2_5_CHECKPOINT_DIR) if re.search(r'epoch_(\d+)', f)]
+        if epoch_numbers:
+            latest_epoch = max(epoch_numbers)
+
+epoch_tensor = torch.tensor([latest_epoch], dtype=torch.int).to(DEVICE)
+dist.broadcast(epoch_tensor, src=0)
+latest_epoch = epoch_tensor.item()
+
+if latest_epoch > 0:
+    checkpoint_path = os.path.join(STAGE2_5_CHECKPOINT_DIR, f"llm_stage2_5_epoch_{latest_epoch}.pth")
+    if local_rank == 0:
+        print(f"💾 Resuming Stage 2.5 training from epoch {latest_epoch+1} using {checkpoint_path}")
+    
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    
+    load_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=False)
+    with FSDP.state_dict_type(llm, StateDictType.FULL_STATE_DICT, load_policy):
+        llm.load_state_dict(checkpoint['model_state_dict'])
+    
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    scaler.load_state_dict(checkpoint['scaler_state_dict'])
+    # FIX 2: Load the scheduler state
+    if 'scheduler_state_dict' in checkpoint:
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    
+    del checkpoint
+    gc.collect()
+    if local_rank == 0:
+        print("✅ Stage 2.5 training state resumed successfully.")
+
+# --- 5.3. Finalize Model Setup ---
+llm.model.embed_tokens.to(DEVICE)
+llm.gradient_checkpointing_enable()
+vision_connector = VisionLanguageConnector().to(DEVICE)
+vision_connector.load_state_dict(torch.load(os.path.join(OUTPUT_DIR, "vision_connector_stage1.pth"), map_location=DEVICE))
+for param in vision_encoder.parameters(): param.requires_grad = False
+for param in vision_connector.parameters(): param.requires_grad = False
 
 if local_rank == 0:
     print(f"Optimizing {sum(p.numel() for p in trainable_params)} trainable router parameters.")
@@ -242,17 +249,14 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
             combined_embeddings = torch.cat([visual_soft_tokens, text_embeddings], dim=1)
             combined_attention_mask = torch.cat([torch.ones(visual_soft_tokens.shape[:2], device=DEVICE), attention_mask], dim=1)
 
-            # **DIFFERENCE**: No manual routing mask needed. The model handles it internally.
             outputs = llm(inputs_embeds=combined_embeddings, attention_mask=combined_attention_mask)
             logits = outputs.logits
 
-            # Calculate Cross-Entropy loss
             num_visual_tokens = visual_soft_tokens.shape[1]
             text_logits = logits[..., num_visual_tokens:-1, :].contiguous()
             text_labels = input_ids[..., 1:].contiguous()
             ce_loss = loss_fn(text_logits.view(-1, llm.config.vocab_size), text_labels.view(-1))
 
-            # **DIFFERENCE**: Collect and add the load balancing loss.
             total_load_balancing_loss = 0
             for layer in llm.module.model.layers:
                 if hasattr(layer.mlp, "load_balancing_loss"):
@@ -268,6 +272,8 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
+            # FIX 2: Step the scheduler
+            scheduler.step()
         
         if local_rank == 0 and (i + 1) % 100 == 0:
             print(f"  Epoch {epoch+1}, Batch [{i+1}/{len(train_loader)}]")
@@ -317,18 +323,18 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
         cpu_state_dict = llm.state_dict()
 
     if local_rank == 0:
-        # FIX: Create a comprehensive checkpoint dictionary that includes all necessary states.
         checkpoint = {
             'model_state_dict': cpu_state_dict,
             'optimizer_state_dict': optimizer.state_dict(),
             'scaler_state_dict': scaler.state_dict(),
+            # FIX 2: Save the scheduler state
+            'scheduler_state_dict': scheduler.state_dict(),
             'epoch': epoch + 1
         }
         
         os.makedirs(STAGE2_5_CHECKPOINT_DIR, exist_ok=True)
         file_path = os.path.join(STAGE2_5_CHECKPOINT_DIR, f"llm_stage2_5_epoch_{epoch+1}.pth")
         
-        # FIX: Save the entire checkpoint dictionary, not just the model weights.
         torch.save(checkpoint, file_path)
         print(f"Router checkpoint saved to {file_path}")
         
