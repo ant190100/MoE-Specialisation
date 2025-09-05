@@ -20,6 +20,7 @@ from models import VisionLanguageConnector
 from data import COCO_Loader
 from torch.amp import GradScaler, autocast
 from torch.distributed.fsdp import CPUOffload
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 # Para GPU imports
 import torch.distributed as dist
@@ -274,6 +275,11 @@ trainable_params = [p for p in llm.parameters() if p.requires_grad]
 
 optimizer = optim.AdamW(trainable_params, lr=train_params["learning_rate"], weight_decay=train_params["weight_decay"], fused=True)
 scaler = GradScaler()
+
+# T_max is the total number of optimizer steps in the entire training run.
+total_steps = (len(train_loader) // accumulation_steps) * NUM_EPOCHS
+scheduler = CosineAnnealingLR(optimizer, T_max=total_steps)
+
 loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 
 if local_rank == 0:
@@ -376,6 +382,7 @@ for epoch in range(latest_epoch, NUM_EPOCHS):
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
+            scheduler.step()
 
         # --- Add periodic print statement for progress ---
         if local_rank == 0 and (i + 1) % 100 == 0:
