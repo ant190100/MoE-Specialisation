@@ -4,12 +4,11 @@
 #SBATCH --gres=gpu:4
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=180G
-#SBATCH --time=16:00:00
+#SBATCH --time=21:00:00
 #SBATCH --output=../out_slurm/train_stage_2/train_stage_2_%j.out
 #SBATCH --error=../err_slurm/train_stage_2/train_stage_2_%j.err
-#SBATCH --gpus-per-task=4
 
 # Load modules
 module purge
@@ -33,7 +32,8 @@ export PYTHONPATH="${PWD}:${PYTHONPATH}"
 echo "Starting training script..."
 export NCCL_DEBUG=INFO # Optional: for debugging network communication
 export PYTHONFAULTHANDLER=1 # Optional: for better tracebacks on segfaults
+export NCCL_TIMEOUT=900    
 
-srun torchrun --nproc_per_node=2 training_scripts/train_stage_2.py
+srun torchrun --nproc_per_node=4 training_scripts/train_stage_2.py
 
 echo "Job finished."
